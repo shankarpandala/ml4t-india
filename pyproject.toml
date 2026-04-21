@@ -80,9 +80,14 @@ requires-python = ">=3.12"
 #
 # ml4t-* packages are intentionally unpinned: upstream owns its release
 # cadence, we follow it. The weekly upstream-drift cron installs them with
-# --upgrade to surface signature drift within a week. The CI install step
-# uses `uv pip install --prerelease=allow` to pick up pre-release builds
-# (which is what most ml4t-* packages currently publish).
+# --upgrade to surface signature drift within a week.
+#
+# `httpx>=0.27,<1` upper-bound is load-bearing: the CI install step uses
+# `pip install --pre` so that upstream ml4t-* pre-releases resolve, but
+# --pre is promiscuous and otherwise happily selects `httpx-1.0.dev*`
+# pre-releases too. That breaks `respx` (dev dep), which imports
+# `httpx.BaseTransport` -- a name removed in the httpx 1.0 line.
+# The cap stays until respx ships a httpx 1.0 compatible release.
 # ----------------------------------------------------------------------------
 dependencies = [
     # ml4t ecosystem (consumed, not forked)
@@ -100,7 +105,7 @@ dependencies = [
     "polars>=0.20",
     "pyarrow>=14",
     "pandas>=2",
-    "httpx>=0.27",
+    "httpx>=0.27,<1",
     "tenacity>=8",
     "pydantic>=2",
     "pydantic-settings>=2",
