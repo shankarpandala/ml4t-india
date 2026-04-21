@@ -27,17 +27,15 @@ jobs:
       fail-fast: false
       matrix:
         # Mainline (must-pass) GIL-enabled CPython versions.
-        # 3.12 is the floor from requires-python; 3.13 and 3.14 are the
-        # two supported upstream stable releases as of this writing.
         python-version: ['3.12', '3.13', '3.14']
         experimental: [false]
         include:
           # Free-threaded CPython (PEP 703 / PEP 779). 3.13t is the first
           # officially released free-threaded build; 3.14t is its successor.
-          # Both are marked experimental: setup-python may not materialise
-          # the requested interpreter on every runner yet, and upstream
-          # wheels are still catching up. Failures here do not block
-          # merges; the status stays visible so we can track when the
+          # Both are marked experimental: upstream wheels for numpy / polars
+          # / pyarrow may not yet exist for free-threaded ABIs, so the full
+          # `.[dev]` install may fall over on these lanes. Failures do not
+          # block merges; the status stays visible so we can track when the
           # ecosystem is ready.
           - python-version: '3.13t'
             experimental: true
@@ -60,27 +58,15 @@ jobs:
         run: |
           python -c "import sys; print('python:', sys.version); print('GIL enabled:', getattr(sys, '_is_gil_enabled', lambda: True)())"
 
-      # -------------------------------------------------------------------
-      # Phase-0 shortcut: install only the tools this phase actually uses.
-      #
-      # Plain `python -m pip install` is deliberate: it uses whatever Python
-      # setup-python put on PATH (the hostedtoolcache install, which is not
-      # externally-managed). Earlier iterations used `uv pip install
-      # --system`, which on ubuntu-latest silently discovers /usr Python
-      # when setup-python cannot provide the requested matrix version --
-      # that /usr Python carries a PEP 668 EXTERNALLY-MANAGED marker and
-      # refuses installation. Staying on plain pip removes that failure mode
-      # entirely.
-      #
-      # TODO(Phase 0.4): when IndianOHLCVProvider(BaseProvider) lands and
-      # starts importing from ml4t.data.providers.base, restore a full
-      # `-e '.[dev]'` install. At that point the complexity of uv + venv or
-      # --python is worth paying for; right now we install two packages.
-      # -------------------------------------------------------------------
-      - name: Install lint + test tools (Phase-0 subset)
+      # Full editable install with --pre so pip considers pre-release builds
+      # of upstream ml4t-* packages (which currently publish only 0.1.0a*/b*
+      # versions). This is the install the previous Phase-0 commits deferred;
+      # Step 0.4 is where we actually import from ml4t.data.providers.base
+      # so the upstream dependency is now required at CI time.
+      - name: Install project + dev extras
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest ruff
+          python -m pip install --pre -e '.[dev]'
 
       - name: Ruff
         run: ruff check .
