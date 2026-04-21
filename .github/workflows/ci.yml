@@ -26,16 +26,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.12', '3.13']
+        # Mainline (must-pass) GIL-enabled CPython versions.
+        # 3.12 is the floor from requires-python; 3.13 and 3.14 are the
+        # two supported upstream stable releases as of this writing.
+        python-version: ['3.12', '3.13', '3.14']
         experimental: [false]
         include:
           # Free-threaded CPython (PEP 703 / PEP 779). 3.13t is the first
-          # officially released free-threaded build. Marked experimental:
-          # setup-python may not materialise a 3.13t interpreter on every
-          # runner yet, and upstream wheels are still catching up. A failure
-          # here does not block merges; the status stays visible so we can
-          # track when the ecosystem is ready.
+          # officially released free-threaded build; 3.14t is its successor.
+          # Both are marked experimental: setup-python may not materialise
+          # the requested interpreter on every runner yet, and upstream
+          # wheels are still catching up. Failures here do not block
+          # merges; the status stays visible so we can track when the
+          # ecosystem is ready.
           - python-version: '3.13t'
+            experimental: true
+          - python-version: '3.14t'
             experimental: true
     continue-on-error: ${{ matrix.experimental }}
     steps:
