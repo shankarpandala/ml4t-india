@@ -103,25 +103,46 @@ class TestWhoami:
         # Click raises UsageError for non-existent path (exists=True).
         assert result.exit_code == 2
 
-    def test_cached_record_dump(self, tmp_path: Path) -> None:
-        """--no-fetch-profile (default) dumps the cached TokenRecord as JSON."""
+    def test_cached_record_dump_redacts_secrets(self, tmp_path: Path) -> None:
+        """--no-fetch-profile (default) dumps the record with secrets redacted."""
         token_path = tmp_path / "token.json"
-        record = _sample_record()
-        # Use the real save_token to produce a valid file.
         from ml4t.india.kite.auth import save_token  # noqa: PLC0415
 
-        save_token(record, path=token_path)
+        save_token(
+            _sample_record(
+                api_key="longapikey1234",
+                access_token="SUPERSECRETBEARER",
+            ),
+            path=token_path,
+        )
 
         runner = CliRunner()
         result = runner.invoke(cli, ["whoami", "--token-path", str(token_path)])
         assert result.exit_code == 0, result.output
-        # First non-empty line starts a JSON object.
         data = json.loads(result.output.strip())
-        assert data["api_key"] == "ak"
+        # access_token must be masked entirely.
+        assert data["access_token"] == "***REDACTED***"
+        # api_key masked head+tail; raw value must not appear.
+        assert data["api_key"] != "longapikey1234"
         assert data["user_id"] == "AB1234"
 
+    def test_whoami_does_not_leak_access_token(self, tmp_path: Path) -> None:
+        """Defense-in-depth: the raw access_token byte-string is nowhere in output."""
+        token_path = tmp_path / "token.json"
+        from ml4t.india.kite.auth import save_token  # noqa: PLC0415
+
+        raw_token = "DEADBEEF-live-bearer-1234"
+        save_token(
+            _sample_record(access_token=raw_token),
+            path=token_path,
+        )
+        runner = CliRunner()
+        result = runner.invoke(cli, ["whoami", "--token-path", str(token_path)])
+        assert result.exit_code == 0
+        assert raw_token not in result.output
+
     def test_fetch_profile_hits_client(self, tmp_path: Path) -> None:
-        """--fetch-profile calls KiteClient.profile() and prints the result."""
+        """--fetch-profile uses KiteClient.from_api_key (facade only, no SDK import)."""
         token_path = tmp_path / "token.json"
         from ml4t.india.kite.auth import save_token  # noqa: PLC0415
 
@@ -130,14 +151,13 @@ class TestWhoami:
         fake_profile = {"user_id": "AB1234", "broker": "ZERODHA"}
 
         class FakeClient:
-            def __init__(self, *args: object, **kwargs: object) -> None: ...
             def profile(self) -> dict[str, str]:
                 return fake_profile
 
         runner = CliRunner()
-        with (
-            patch("kiteconnect.KiteConnect"),
-            patch("ml4t.india.kite.client.KiteClient", FakeClient),
+        with patch(
+            "ml4t.india.kite.client.KiteClient.from_api_key",
+            return_value=FakeClient(),
         ):
             result = runner.invoke(
                 cli,

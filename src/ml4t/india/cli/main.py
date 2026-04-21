@@ -96,31 +96,51 @@ def login(api_key: str, api_secret: str, token_path: Path | None) -> None:
     help="Also fetch the live Kite profile (requires a valid session).",
 )
 def whoami(token_path: Path | None, fetch_profile: bool) -> None:
-    """Print the cached token (and optionally the live Kite profile)."""
+    """Print the cached token (and optionally the live Kite profile).
+
+    ``access_token`` is redacted and ``api_key`` is partially masked
+    before printing so terminal scrollback / CI logs / screen capture
+    tools cannot leak a live bearer token. Use the file directly (via
+    ``load_token``) if you need the raw values.
+    """
     record = load_token(path=token_path)
     if record is None:
         click.secho("No token on disk. Run `ml4t-india login` first.", fg="red", err=True)
         sys.exit(1)
 
-    # Always dump the cached record (safe -- no secret is stored).
-    click.echo(json.dumps(dataclasses.asdict(record), indent=2, default=str))
+    # Always dump the cached record with secrets redacted.
+    safe = dataclasses.asdict(record)
+    safe["access_token"] = "***REDACTED***"
+    safe["api_key"] = _mask(record.api_key)
+    click.echo(json.dumps(safe, indent=2, default=str))
 
     if not fetch_profile:
         return
 
-    # Lazy-import so `ml4t-india --help` doesn't pay the kiteconnect cost.
-    from kiteconnect import KiteConnect  # noqa: PLC0415
-
+    # Lazy import of the facade so `ml4t-india --help` stays snappy.
+    # NOTE: we deliberately do NOT import `kiteconnect` here -- per the
+    # AGENTS.md boundary, that SDK must only be imported under
+    # `src/ml4t/india/kite/`. `KiteClient.from_api_key` builds the real
+    # SDK behind the facade.
     from ml4t.india.kite.client import KiteClient  # noqa: PLC0415
 
-    sdk = KiteConnect(api_key=record.api_key)
-    client = KiteClient(sdk=sdk, access_token=record.access_token)
+    client = KiteClient.from_api_key(
+        api_key=record.api_key,
+        access_token=record.access_token,
+    )
     try:
         profile = client.profile()
     except IndiaError as exc:
         click.secho(f"Profile fetch failed: {exc}", fg="red", err=True)
         sys.exit(1)
     click.echo(json.dumps(profile, indent=2, default=str))
+
+
+def _mask(secret: str, keep_head: int = 4, keep_tail: int = 2) -> str:
+    """Shorten a secret to a head/tail fingerprint for log-safe printing."""
+    if len(secret) <= keep_head + keep_tail:
+        return "***"
+    return f"{secret[:keep_head]}...{secret[-keep_tail:]}"
 
 
 if __name__ == "__main__":
