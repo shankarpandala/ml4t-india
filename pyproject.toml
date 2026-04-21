@@ -163,6 +163,11 @@ Issues     = "https://github.com/shankarpandala/ml4t-india/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Prepend src/ to sys.path during test collection so `ml4t.india.*` resolves
+# without needing `pip install -e .`. The namespace package (PEP 420) layout
+# works correctly with this because no `src/ml4t/__init__.py` exists to break
+# namespace discovery.
+pythonpath = ["src"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
