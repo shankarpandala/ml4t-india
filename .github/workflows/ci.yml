@@ -14,10 +14,8 @@ concurrency:
 
 # Set once at workflow level so every step in every job sees it. Any hatchling
 # / hatch-vcs / setuptools-scm invocation bypasses VCS inspection and uses
-# this version. Real release tags unset it by simply existing: setuptools-scm
-# prefers a real tag over PRETEND_VERSION when both are present... actually no,
-# PRETEND_VERSION wins, so we will remove this variable the first time we
-# tag a real release.
+# this version. When we tag a real release we remove this env var; setuptools-scm
+# then derives the version from the tag automatically.
 env:
   SETUPTOOLS_SCM_PRETEND_VERSION: "0.0.0.dev0"
 
@@ -31,21 +29,18 @@ jobs:
         python-version: ['3.12', '3.13']
         experimental: [false]
         include:
-          # Free-threaded CPython (PEP 703 / PEP 779). Marked experimental:
-          # upstream ml4t-* and some transitive C extensions may not have
-          # no-GIL wheels yet. A failure here should not block merges, but
-          # it WILL show up as a status so we track the progression.
+          # Free-threaded CPython (PEP 703 / PEP 779). 3.13t is the first
+          # officially released free-threaded build. Marked experimental:
+          # setup-python may not materialise a 3.13t interpreter on every
+          # runner yet, and upstream wheels are still catching up. A failure
+          # here does not block merges; the status stays visible so we can
+          # track when the ecosystem is ready.
           - python-version: '3.13t'
             experimental: true
     continue-on-error: ${{ matrix.experimental }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      # Caching is off until we commit a uv.lock (phase 8). setup-uv's
-      # default cache key hashes **/uv.lock and errors out when absent.
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
 
       # allow-prereleases covers the window between a new free-threaded
       # build being released and setup-python's stable listing of it.
@@ -62,18 +57,24 @@ jobs:
       # -------------------------------------------------------------------
       # Phase-0 shortcut: install only the tools this phase actually uses.
       #
-      # We deliberately do NOT install `-e '.[dev]'` here because Phase-0
-      # ships zero code that imports from upstream ml4t-* packages; the
-      # only test is `test_placeholder.py` which uses the stdlib alone.
+      # Plain `python -m pip install` is deliberate: it uses whatever Python
+      # setup-python put on PATH (the hostedtoolcache install, which is not
+      # externally-managed). Earlier iterations used `uv pip install
+      # --system`, which on ubuntu-latest silently discovers /usr Python
+      # when setup-python cannot provide the requested matrix version --
+      # that /usr Python carries a PEP 668 EXTERNALLY-MANAGED marker and
+      # refuses installation. Staying on plain pip removes that failure mode
+      # entirely.
       #
-      # TODO(Phase 0.4): once IndianOHLCVProvider(BaseProvider) lands and
-      # starts importing from ml4t.data.providers.base, switch this back
-      # to `uv pip install --system --prerelease=allow -e '.[dev]'` and
-      # diagnose any remaining resolution issue with full local logs.
+      # TODO(Phase 0.4): when IndianOHLCVProvider(BaseProvider) lands and
+      # starts importing from ml4t.data.providers.base, restore a full
+      # `-e '.[dev]'` install. At that point the complexity of uv + venv or
+      # --python is worth paying for; right now we install two packages.
       # -------------------------------------------------------------------
       - name: Install lint + test tools (Phase-0 subset)
         run: |
-          uv pip install --system pytest ruff
+          python -m pip install --upgrade pip
+          python -m pip install pytest ruff
 
       - name: Ruff
         run: ruff check .
@@ -101,7 +102,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install build backend
-        run: pip install build
+        run: python -m pip install --upgrade pip build
 
       - name: Build sdist and universal wheel
         run: python -m build

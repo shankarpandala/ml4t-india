@@ -3,14 +3,17 @@
 #
 # Intentional choices:
 #   * No `license` field / classifier (per project owner, for now).
-#   * Free-threaded Python supported via PEP 779 classifier; one universal
-#     wheel covers both GIL and no-GIL interpreters (pure Python, no C ext).
 #   * ml4t-* upstream packages are NOT version-pinned (per project owner);
 #     uv/pip resolves whatever PyPI offers. Drift is caught by the weekly
 #     upstream-drift cron (see .github/workflows/upstream-drift.yml).
 #   * Version derivation is left to hatch-vcs + setuptools-scm with no
 #     pyproject-side fallback. Tag-less builds (CI before first release)
 #     rely on SETUPTOOLS_SCM_PRETEND_VERSION set by the workflow.
+#   * Free-threaded Python (PEP 779) classifier is deliberately NOT listed
+#     yet. Restore it only after the 3.13t CI lane has been consistently
+#     green, and start at `1 - Unstable`; graduate to `2 - Beta` and
+#     `3 - Stable` as our test coverage and upstream wheel availability
+#     warrant.
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -65,7 +68,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: Free Threading :: 3 - Stable",
     "Topic :: Office/Business :: Financial :: Investment",
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Typing :: Typed",
