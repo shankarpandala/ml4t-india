@@ -50,9 +50,24 @@ jobs:
         run: |
           python -c "import sys; print('python:', sys.version); print('GIL enabled:', getattr(sys, '_is_gil_enabled', lambda: True)())"
 
-      - name: Install project + dev extras
+      # -------------------------------------------------------------------
+      # Phase-0 shortcut: install only the tools this phase actually uses.
+      #
+      # We deliberately do NOT install `-e '.[dev]'` here because Phase-0
+      # ships zero code that imports from upstream ml4t-* packages; the
+      # only test is `test_placeholder.py` which uses the stdlib alone.
+      # Resolving the full dependency tree right now would exercise
+      # transitive pre-release constraints in ml4t-data / ml4t-specs /
+      # ml4t-live that are orthogonal to this step's scope.
+      #
+      # TODO(Phase 0.4): once IndianOHLCVProvider(BaseProvider) lands and
+      # starts importing from ml4t.data.providers.base, switch this back
+      # to `uv pip install --system -e '.[dev]'` and diagnose any
+      # remaining resolution issue with full local logs.
+      # -------------------------------------------------------------------
+      - name: Install lint + test tools (Phase-0 subset)
         run: |
-          uv pip install --system -e '.[dev]'
+          uv pip install --system pytest ruff
 
       - name: Ruff
         run: ruff check .
