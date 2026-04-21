@@ -12,6 +12,10 @@ facade in ``KiteProvider`` and ``KiteBroker``.
 
 from __future__ import annotations
 
+from ml4t.india.kite.errors import translate as translate_kite_exception
 from ml4t.india.kite.fake import FakeKiteClient
 
-__all__ = ["FakeKiteClient"]
+__all__ = [
+    "FakeKiteClient",
+    "translate_kite_exception",
+]

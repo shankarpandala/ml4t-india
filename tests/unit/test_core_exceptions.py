@@ -19,6 +19,7 @@ from ml4t.india.core import (
     NetworkError,
     OrderError,
     OrderRejectedError,
+    PermissionDeniedError,
     RateLimitError,
     SessionError,
     TokenExpiredError,
@@ -31,6 +32,7 @@ class TestHierarchy:
         [
             SessionError,
             TokenExpiredError,
+            PermissionDeniedError,
             InvalidInputError,
             InstrumentNotFoundError,
             OrderError,
@@ -47,6 +49,17 @@ class TestHierarchy:
 
     def test_token_expired_is_session_error(self) -> None:
         assert issubclass(TokenExpiredError, SessionError)
+
+    def test_permission_denied_is_direct_india_error_subclass(self) -> None:
+        """PermissionDeniedError is deliberately NOT under SessionError.
+
+        Kite's PermissionException fires for segment-not-enabled cases
+        (F&O on a cash-only account) which is orthogonal to whether a
+        session is open. We surface it as a direct IndiaError subclass
+        so callers can catch permissions separately from auth issues.
+        """
+        assert issubclass(PermissionDeniedError, IndiaError)
+        assert not issubclass(PermissionDeniedError, SessionError)
 
     def test_instrument_not_found_is_invalid_input(self) -> None:
         assert issubclass(InstrumentNotFoundError, InvalidInputError)

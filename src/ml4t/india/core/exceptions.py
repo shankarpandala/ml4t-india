@@ -69,6 +69,22 @@ class TokenExpiredError(SessionError):
     """
 
 
+class PermissionDeniedError(IndiaError):
+    """The account or API key does not have permission for the requested action.
+
+    Common triggers on Zerodha Kite:
+
+    * Account is not enabled for the target segment (e.g. calling an F&O
+      endpoint from a cash-only account).
+    * API key lacks the specific permission for the action (e.g. order
+      placement disabled on a read-only key).
+
+    Distinct from :class:`SessionError` (which is about whether a session
+    exists at all) and :class:`InvalidInputError` (which is about the
+    request payload being malformed).
+    """
+
+
 # --- request / input --------------------------------------------------------
 
 
@@ -145,6 +161,7 @@ __all__ = [
     "NetworkError",
     "OrderError",
     "OrderRejectedError",
+    "PermissionDeniedError",
     "RateLimitError",
     "SessionError",
     "TokenExpiredError",
