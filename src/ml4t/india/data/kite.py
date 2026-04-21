@@ -53,6 +53,21 @@ _FREQUENCY_MAP: dict[str, str] = {
     "hour": "60minute",
 }
 
+# Kite's per-request date-range ceilings (inclusive days) by interval.
+# Source: https://kite.trade/docs/connect/v3/historical/#availability
+# These are conservative; exceeding them yields an empty response or
+# HTTP 400 from the SDK.
+_MAX_DAYS_PER_REQUEST: dict[str, int] = {
+    "minute": 60,
+    "3minute": 100,
+    "5minute": 100,
+    "10minute": 100,
+    "15minute": 200,
+    "30minute": 200,
+    "60minute": 400,
+    "day": 2000,
+}
+
 
 class KiteProvider(IndianOHLCVProvider):
     """OHLCV provider backed by Zerodha Kite's ``historical_data`` endpoint.
@@ -111,29 +126,44 @@ class KiteProvider(IndianOHLCVProvider):
         end: str,
         frequency: str = "daily",
     ) -> pl.DataFrame:
-        """Resolve ``symbol``, fetch candles, return the canonical frame.
+        """Resolve ``symbol``, fetch candles (chunked if needed), return frame.
 
         ``symbol`` may be either the bare tradingsymbol (``"RELIANCE"``)
         or ``EXCHANGE:SYMBOL`` (``"BSE:RELIANCE"``); the latter pins the
         exchange, the former falls back to
         :attr:`KiteProvider._default_exchange`.
 
-        Phase-2.1 ships a single-window fetch (no chunking). A request
-        for >60 days of 1-minute candles will fail at the Kite endpoint;
-        the windowing layer in Phase 2.3 will split those ranges before
-        calling here.
+        For requests longer than Kite's documented per-interval ceiling
+        (``_MAX_DAYS_PER_REQUEST``), the range is split into successive
+        windows and the per-chunk frames concatenated into a single
+        OHLCV frame. Each chunk draws one token from the
+        :class:`~ml4t.india.kite.rate_limit.KiteRateLimiter` historical
+        bucket (3 req/s), so multi-year minute requests are throttled
+        automatically.
         """
         tradingsymbol, exchange = self._split_symbol(symbol)
         meta = self._instruments.resolve(tradingsymbol, exchange=exchange)
         kite_interval = _FREQUENCY_MAP.get(frequency, frequency)
 
-        raw = self._client.historical_data(
-            instrument_token=meta.instrument_token,
-            from_date=start,
-            to_date=end,
-            interval=kite_interval,
+        frames: list[pl.DataFrame] = []
+        for chunk_start, chunk_end in _chunk_date_range(
+            start, end, _MAX_DAYS_PER_REQUEST.get(kite_interval, 2000)
+        ):
+            raw = self._client.historical_data(
+                instrument_token=meta.instrument_token,
+                from_date=chunk_start,
+                to_date=chunk_end,
+                interval=kite_interval,
+            )
+            frames.append(_kite_candles_to_frame(raw, symbol=tradingsymbol))
+
+        if not frames:
+            return _kite_candles_to_frame([], symbol=tradingsymbol)
+        if len(frames) == 1:
+            return frames[0]
+        return pl.concat(frames, how="vertical").unique(
+            subset=["timestamp"], maintain_order=True
         )
-        return _kite_candles_to_frame(raw, symbol=tradingsymbol)
 
     # ---- helpers -------------------------------------------------------
 
@@ -222,6 +252,44 @@ def _coerce_timestamp(value: object) -> dt.datetime:
         parsed = dt.datetime.fromisoformat(value)
         return parsed.replace(tzinfo=None)
     raise TypeError(f"unsupported timestamp type: {type(value).__name__}")
+
+
+def _chunk_date_range(
+    start: str, end: str, max_days: int
+) -> list[tuple[str, str]]:
+    """Split ``start..end`` (inclusive) into windows of at most ``max_days`` each.
+
+    Inputs can be ``YYYY-MM-DD`` or ``YYYY-MM-DD HH:MM:SS``; outputs mirror
+    the input format. Empty and single-window cases fall through as one
+    tuple; no rounding is applied.
+    """
+    start_dt = _parse_input_date(start)
+    end_dt = _parse_input_date(end)
+    if start_dt > end_dt:
+        return []
+
+    span = (end_dt - start_dt).days
+    if span <= max_days:
+        return [(start, end)]
+
+    chunks: list[tuple[str, str]] = []
+    cursor = start_dt
+    delta = dt.timedelta(days=max_days)
+    while cursor <= end_dt:
+        chunk_end = min(cursor + delta, end_dt)
+        chunks.append((cursor.date().isoformat(), chunk_end.date().isoformat()))
+        if chunk_end >= end_dt:
+            break
+        cursor = chunk_end + dt.timedelta(days=1)
+    return chunks
+
+
+def _parse_input_date(value: str) -> dt.datetime:
+    """Parse a ``YYYY-MM-DD`` or ``YYYY-MM-DD HH:MM:SS`` string into a datetime."""
+    try:
+        return dt.datetime.fromisoformat(value)
+    except ValueError:
+        return dt.datetime.strptime(value, "%Y-%m-%d")
 
 
 __all__ = ["KiteProvider"]

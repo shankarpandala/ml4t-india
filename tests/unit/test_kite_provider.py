@@ -72,9 +72,6 @@ def provider(tmp_path: Path) -> tuple[KiteProvider, FakeKiteClient]:
     return KiteProvider(client=client, instruments=cache), fake
 
 
-# ---------- inheritance contract ----------
-
-
 class TestInheritance:
     def test_extends_indian_ohlcv_provider(self) -> None:
         from ml4t.india.data import IndianOHLCVProvider
@@ -89,9 +86,6 @@ class TestInheritance:
         assert Exchange.NSE in KiteProvider.SUPPORTED_EXCHANGES
         assert Exchange.NFO in KiteProvider.SUPPORTED_EXCHANGES
         assert Exchange.MCX in KiteProvider.SUPPORTED_EXCHANGES
-
-
-# ---------- fetch ----------
 
 
 class TestFetchOHLCV:
@@ -121,7 +115,6 @@ class TestFetchOHLCV:
     def test_exchange_prefix_pins_venue(
         self, provider: tuple[KiteProvider, FakeKiteClient]
     ) -> None:
-        """`BSE:RELIANCE` must resolve to BSE instrument_token, not NSE."""
         p, fake = provider
         fake.set_historical_data(
             "140033796",
@@ -150,17 +143,13 @@ class TestFetchOHLCV:
     def test_frequency_map_translates_to_kite_interval(
         self, provider: tuple[KiteProvider, FakeKiteClient]
     ) -> None:
-        """'5min' and 'daily' map to '5minute' and 'day' on the wire."""
         p, fake = provider
         fake.set_historical_data(
             "738561",
             [
                 {
                     "date": "2024-01-01T09:15:00+05:30",
-                    "open": 1.0,
-                    "high": 1.0,
-                    "low": 1.0,
-                    "close": 1.0,
+                    "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0,
                     "volume": 0.0,
                 },
             ],
@@ -180,3 +169,66 @@ class TestFetchOHLCV:
         assert set(df.columns) == {
             "timestamp", "symbol", "open", "high", "low", "close", "volume",
         }
+
+
+class TestWindowing:
+    def test_short_range_fits_single_request(
+        self, provider: tuple[KiteProvider, FakeKiteClient]
+    ) -> None:
+        """A 30-day daily request fits in one Kite call (2000-day ceiling)."""
+        p, fake = provider
+        fake.set_historical_data(
+            "738561",
+            [
+                {
+                    "date": "2024-01-01T09:15:00+05:30",
+                    "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0,
+                    "volume": 0.0,
+                },
+            ],
+        )
+        before = len([c for c in fake.calls if c.method == "historical_data"])
+        p.fetch_ohlcv("RELIANCE", "2024-01-01", "2024-01-30", "daily")
+        after = len([c for c in fake.calls if c.method == "historical_data"])
+        assert after - before == 1
+
+    def test_long_minute_range_chunks_on_60_day_ceiling(
+        self, provider: tuple[KiteProvider, FakeKiteClient]
+    ) -> None:
+        """A 200-day minute request splits into ceil(200/60)=4 Kite calls."""
+        p, fake = provider
+        fake.set_historical_data(
+            "738561",
+            [
+                {
+                    "date": "2024-01-01T09:15:00+05:30",
+                    "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0,
+                    "volume": 0.0,
+                },
+            ],
+        )
+        before = len([c for c in fake.calls if c.method == "historical_data"])
+        p.fetch_ohlcv("RELIANCE", "2024-01-01", "2024-07-19", "minute")
+        chunks = len(
+            [c for c in fake.calls if c.method == "historical_data"]
+        ) - before
+        assert chunks == 4, f"expected 4 chunks for 200 days @ 60-day ceiling; got {chunks}"
+
+    def test_deduplicates_overlapping_timestamps_across_chunks(
+        self, provider: tuple[KiteProvider, FakeKiteClient]
+    ) -> None:
+        """Adjacent chunks share the boundary day; dedup keeps one row."""
+        p, fake = provider
+        fake.set_historical_data(
+            "738561",
+            [
+                {
+                    "date": "2024-01-01T09:15:00+05:30",
+                    "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0,
+                    "volume": 0.0,
+                },
+            ],
+        )
+        df = p.fetch_ohlcv("RELIANCE", "2024-01-01", "2024-07-19", "minute")
+        # 4 chunks x 1 candle -> 1 after dedup.
+        assert df.height == 1
