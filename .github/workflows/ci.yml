@@ -32,11 +32,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          # hatch-vcs reads tag history to derive the version when installing
-          # `-e .`. Without fetch-depth: 0 we only get the PR head and the
-          # fallback_version path kicks in -- that works but logs a warning.
-          fetch-depth: 0
 
       # Caching is off until we commit a uv.lock (phase 8). setup-uv's
       # default cache key hashes **/uv.lock and errors out when absent.
@@ -55,15 +50,21 @@ jobs:
         run: |
           python -c "import sys; print('python:', sys.version); print('GIL enabled:', getattr(sys, '_is_gil_enabled', lambda: True)())"
 
-      # `--prerelease=allow` is required while upstream ml4t-* packages
-      # publish only pre-release builds; uv's default (`if-necessary`)
-      # handles most of them but some transitive chains need the explicit
-      # opt-in. The flag stays CI-side; the package specifiers in
-      # pyproject.toml intentionally carry no version constraint on
-      # ml4t-*.
-      - name: Install project + dev extras
+      # -------------------------------------------------------------------
+      # Phase-0 shortcut: install only the tools this phase actually uses.
+      #
+      # We deliberately do NOT install `-e '.[dev]'` here because Phase-0
+      # ships zero code that imports from upstream ml4t-* packages; the
+      # only test is `test_placeholder.py` which uses the stdlib alone.
+      #
+      # TODO(Phase 0.4): once IndianOHLCVProvider(BaseProvider) lands and
+      # starts importing from ml4t.data.providers.base, switch this back
+      # to `uv pip install --system --prerelease=allow -e '.[dev]'` and
+      # diagnose any remaining resolution issue with full local logs.
+      # -------------------------------------------------------------------
+      - name: Install lint + test tools (Phase-0 subset)
         run: |
-          uv pip install --system --prerelease=allow -e '.[dev]'
+          uv pip install --system pytest ruff
 
       - name: Ruff
         run: ruff check .
@@ -79,9 +80,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # hatch-vcs reads the tag history to derive the version.
-          # fallback_version in pyproject.toml covers the tag-less case
-          # (e.g. this PR before the first release tag).
+          # hatch-vcs reads the tag history to derive the version. Without
+          # tags, the fallback_version in pyproject.toml and the env var
+          # below both cover the case.
           fetch-depth: 0
 
       - name: Set up Python
@@ -92,7 +93,14 @@ jobs:
       - name: Install build backend
         run: pip install build
 
+      # SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<NORMALIZED_NAME> is read directly
+      # by setuptools-scm (which hatch-vcs wraps) and bypasses all VCS
+      # inspection. It is a belt-and-suspenders guarantee: even if the
+      # pyproject's `raw-options.fallback_version` turns out wrong for the
+      # hatch-vcs version that gets installed, this env var still wins.
       - name: Build sdist and universal wheel
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ML4T_INDIA: "0.0.0.dev0"
         run: python -m build
 
       - name: Upload artifacts
