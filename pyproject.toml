@@ -1,0 +1,234 @@
+# ml4t-india - Algorithmic trading for Indian markets (NSE, BSE) via Zerodha Kite
+# Pure-Python extension layer on top of the ml4t-* companion libraries.
+#
+# Intentional choices:
+#   * No `license` field / classifier (per project owner, for now).
+#   * Free-threaded Python supported via PEP 779 classifier; one universal
+#     wheel covers both GIL and no-GIL interpreters (pure Python, no C ext).
+#   * Upstream ml4t-* deps are pinned with lower bounds only; weekly CI cron
+#     installs `--upgrade` to surface drift early (see upstream-drift.yml).
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/ml4t/india/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ml4t"]
+namespaces = true
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/README.md",
+    "/AGENTS.md",
+    "/CHANGELOG.md",
+]
+
+[project]
+name = "ml4t-india"
+dynamic = ["version"]
+description = "Algorithmic trading for Indian markets (NSE, BSE) on top of the ml4t-* ecosystem"
+readme = "README.md"
+authors = [
+    { name = "Shankar Pandala" },
+]
+keywords = [
+    "finance",
+    "trading",
+    "quantitative-finance",
+    "india",
+    "nse",
+    "bse",
+    "zerodha",
+    "kite",
+    "ml4t",
+    "backtesting",
+    "live-trading",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Free Threading :: 3 - Stable",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Typing :: Typed",
+]
+requires-python = ">=3.12"
+
+# ----------------------------------------------------------------------------
+# Core runtime dependencies.
+#
+# The five ml4t-* companion libraries are declared with lower bounds only.
+# We DO NOT hard-pin to specific versions: upstream bumps should flow through
+# naturally. Drift is caught by the weekly upstream-drift CI cron.
+# ----------------------------------------------------------------------------
+dependencies = [
+    # ml4t ecosystem (consumed, not forked)
+    "ml4t-data>=0.1.0",
+    "ml4t-engineer>=0.1.0",
+    "ml4t-backtest>=0.1.0",
+    "ml4t-live>=0.1.0",
+    "ml4t-diagnostic>=0.1.0",
+    # Broker SDK
+    "kiteconnect>=5.0.0",
+    # Market-session awareness (BSEExchangeCalendar subclass powers NSECalendar)
+    "pandas-market-calendars>=4.3.0",
+    # Data / transport / typing utilities (most of these are already transitive,
+    # pinned here too because our adapters import them directly)
+    "polars>=0.20",
+    "pyarrow>=14",
+    "pandas>=2",
+    "httpx>=0.27",
+    "tenacity>=8",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "pyyaml>=6",
+    "click>=8",
+    "structlog>=23",
+    "rich>=13",
+    "pytz>=2024.1",
+]
+
+[project.optional-dependencies]
+# Option-chain Greeks via py_vollib; optional so a numpy-only fallback path
+# stays usable when py_vollib is not installed.
+options = [
+    "py_vollib>=1.0.1",
+]
+
+# Plotly-driven tear sheets inherited from ml4t-diagnostic.
+viz = [
+    "ml4t-diagnostic[viz]>=0.1.0",
+    "plotly>=5",
+]
+
+# Development and testing toolchain.
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.1",
+    "pytest-timeout>=2.1",
+    "hypothesis>=6.80",
+    "vcrpy>=6",
+    "respx>=0.21",
+    "ruff>=0.8",
+    "ty",
+    "pre-commit>=3",
+]
+
+# MkDocs Material + mkdocstrings (matching the companion libraries' doc style).
+docs = [
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.24",
+    "mkdocs-jupyter>=0.24",
+]
+
+all = [
+    "ml4t-india[options,viz,dev,docs]",
+]
+
+[project.scripts]
+ml4t-india = "ml4t.india.cli.main:cli"
+
+[project.urls]
+Repository = "https://github.com/shankarpandala/ml4t-india"
+Issues     = "https://github.com/shankarpandala/ml4t-india/issues"
+
+# ----------------------------------------------------------------------------
+# Tooling: pytest, ruff, ty, coverage.
+# ----------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "integration: marks tests hitting real Kite endpoints (opt-in; needs credentials)",
+    "cassette: marks tests replaying recorded HTTP traffic",
+    "contract: marks tests asserting upstream protocol/class API shape",
+    "slow: marks slow tests",
+    "free_threaded_only: marks tests that only make sense on a free-threaded interpreter",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+timeout = 120
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+fix = true
+exclude = ["src/ml4t/india/_version.py"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade
+    "ARG",  # flake8-unused-arguments
+    "SIM",  # flake8-simplify
+]
+ignore = [
+    "E501",   # handled by formatter
+    "B008",   # function calls in default args (common for Pydantic/Click)
+    "B905",   # zip without explicit strict=
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG001", "ARG002", "F841", "SIM117"]
+
+[tool.ty.environment]
+python-version = "3.12"
+root = ["src"]
+
+[tool.ty.src]
+include = ["src"]
+exclude = ["tests"]
+
+[tool.ty.rules]
+unresolved-import = "ignore"
+unresolved-attribute = "ignore"
+unused-type-ignore-comment = "ignore"
+
+[tool.coverage.run]
+source = ["src/ml4t/india"]
+omit = [
+    "*/tests/*",
+    "*/__init__.py",
+    "src/ml4t/india/_version.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@abstractmethod",
+]
