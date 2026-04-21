@@ -33,14 +33,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Caching is off until we commit a uv.lock (phase 8). setup-uv's
+      # default cache key hashes **/uv.lock and errors out when absent.
       - name: Install uv
         uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
 
+      # allow-prereleases covers the window between a new free-threaded
+      # build being released and setup-python's stable listing of it.
       - name: Set up Python ${{ matrix.python-version }}
-          # allow-prereleases covers the window between a 3.14t availability
-          # and setup-python's stable listing of it.
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
