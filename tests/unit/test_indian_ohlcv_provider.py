@@ -49,11 +49,14 @@ class TestInheritanceContract:
         with pytest.raises(TypeError):
             IndianOHLCVProvider()  # type: ignore[abstract]
 
-    def test_fetch_ohlcv_template_method_inherited(self) -> None:
-        """We consume upstream's template method without overriding it.
+    def test_fetch_ohlcv_not_shadowed_in_our_class_body(self) -> None:
+        """We consume upstream's template method without shadowing it.
 
-        Asserting identity here guards against a future refactor that
-        accidentally shadows the template method -- which would silently
-        skip rate limiting, validation, and retry.
+        Checks the class body (``vars()``) rather than attribute lookup:
+        the latter can be confused by decorators like ``@tenacity.retry``
+        that upstream uses on ``fetch_ohlcv``. What we actually care about
+        is that ``IndianOHLCVProvider`` does NOT re-define the method
+        itself -- if a future refactor did that, rate-limiting,
+        validation, and retry would all silently stop running.
         """
-        assert IndianOHLCVProvider.fetch_ohlcv is BaseProvider.fetch_ohlcv
+        assert "fetch_ohlcv" not in vars(IndianOHLCVProvider)
