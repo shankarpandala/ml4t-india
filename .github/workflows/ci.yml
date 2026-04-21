@@ -32,6 +32,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # hatch-vcs reads tag history to derive the version when installing
+          # `-e .`. Without fetch-depth: 0 we only get the PR head and the
+          # fallback_version path kicks in -- that works but logs a warning.
+          fetch-depth: 0
 
       # Caching is off until we commit a uv.lock (phase 8). setup-uv's
       # default cache key hashes **/uv.lock and errors out when absent.
@@ -50,24 +55,15 @@ jobs:
         run: |
           python -c "import sys; print('python:', sys.version); print('GIL enabled:', getattr(sys, '_is_gil_enabled', lambda: True)())"
 
-      # -------------------------------------------------------------------
-      # Phase-0 shortcut: install only the tools this phase actually uses.
-      #
-      # We deliberately do NOT install `-e '.[dev]'` here because Phase-0
-      # ships zero code that imports from upstream ml4t-* packages; the
-      # only test is `test_placeholder.py` which uses the stdlib alone.
-      # Resolving the full dependency tree right now would exercise
-      # transitive pre-release constraints in ml4t-data / ml4t-specs /
-      # ml4t-live that are orthogonal to this step's scope.
-      #
-      # TODO(Phase 0.4): once IndianOHLCVProvider(BaseProvider) lands and
-      # starts importing from ml4t.data.providers.base, switch this back
-      # to `uv pip install --system -e '.[dev]'` and diagnose any
-      # remaining resolution issue with full local logs.
-      # -------------------------------------------------------------------
-      - name: Install lint + test tools (Phase-0 subset)
+      # `--prerelease=allow` is required while upstream ml4t-* packages
+      # publish only pre-release builds; uv's default (`if-necessary`)
+      # handles most of them but some transitive chains need the explicit
+      # opt-in. The flag stays CI-side; the package specifiers in
+      # pyproject.toml intentionally carry no version constraint on
+      # ml4t-*.
+      - name: Install project + dev extras
         run: |
-          uv pip install --system pytest ruff
+          uv pip install --system --prerelease=allow -e '.[dev]'
 
       - name: Ruff
         run: ruff check .
@@ -84,6 +80,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           # hatch-vcs reads the tag history to derive the version.
+          # fallback_version in pyproject.toml covers the tag-less case
+          # (e.g. this PR before the first release tag).
           fetch-depth: 0
 
       - name: Set up Python

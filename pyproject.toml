@@ -5,8 +5,9 @@
 #   * No `license` field / classifier (per project owner, for now).
 #   * Free-threaded Python supported via PEP 779 classifier; one universal
 #     wheel covers both GIL and no-GIL interpreters (pure Python, no C ext).
-#   * Upstream ml4t-* deps are pinned with lower bounds only; weekly CI cron
-#     installs `--upgrade` to surface drift early (see upstream-drift.yml).
+#   * ml4t-* upstream packages are NOT version-pinned (per project owner);
+#     uv/pip resolves whatever PyPI offers. Drift is caught by the weekly
+#     upstream-drift cron (see .github/workflows/upstream-drift.yml).
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -14,6 +15,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
+# Fallback used when the repo has no git tags yet (e.g. on a fresh clone or
+# in CI before the first tagged release). Once a real tag exists, hatch-vcs
+# derives the version from it and the fallback becomes invisible.
+raw-options = { fallback_version = "0.0.0.dev0" }
 
 [tool.hatch.build.hooks.vcs]
 version-file = "src/ml4t/india/_version.py"
@@ -71,24 +76,19 @@ requires-python = ">=3.12"
 # ----------------------------------------------------------------------------
 # Core runtime dependencies.
 #
-# The five ml4t-* companion libraries are declared with lower bounds only.
-# We DO NOT hard-pin to specific versions: upstream bumps should flow through
-# naturally. Drift is caught by the weekly upstream-drift CI cron.
-#
-# The `a1` suffix on each ml4t-* pin is INTENTIONAL and must not be removed.
-# Upstream currently publishes only pre-release versions (0.1.0a*, 0.1.0b*).
-# PEP 440 requires the specifier itself to mention a pre-release in order
-# for the resolver to consider pre-releases, so `>=0.1.0` matches nothing
-# today and `>=0.1.0a1` matches every current and future version including
-# any eventual `0.1.0` stable release (alpha < beta < rc < final).
+# ml4t-* packages are intentionally unpinned: upstream owns its release
+# cadence, we follow it. The weekly upstream-drift cron installs them with
+# --upgrade to surface signature drift within a week. The CI install step
+# uses `uv pip install --prerelease=allow` to pick up pre-release builds
+# (which is what most ml4t-* packages currently publish).
 # ----------------------------------------------------------------------------
 dependencies = [
     # ml4t ecosystem (consumed, not forked)
-    "ml4t-data>=0.1.0a1",
-    "ml4t-engineer>=0.1.0a1",
-    "ml4t-backtest>=0.1.0a1",
-    "ml4t-live>=0.1.0a1",
-    "ml4t-diagnostic>=0.1.0a1",
+    "ml4t-data",
+    "ml4t-engineer",
+    "ml4t-backtest",
+    "ml4t-live",
+    "ml4t-diagnostic",
     # Broker SDK
     "kiteconnect>=5.0.0",
     # Market-session awareness (BSEExchangeCalendar subclass powers NSECalendar)
@@ -117,9 +117,8 @@ options = [
 ]
 
 # Plotly-driven tear sheets inherited from ml4t-diagnostic.
-# Note the matching `a1` pre-release-aware floor (see comment on core deps).
 viz = [
-    "ml4t-diagnostic[viz]>=0.1.0a1",
+    "ml4t-diagnostic[viz]",
     "plotly>=5",
 ]
 
