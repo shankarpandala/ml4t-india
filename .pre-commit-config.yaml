@@ -1,0 +1,39 @@
+# Pre-commit hooks for ml4t-india.
+#
+# Mirrors what the Phase-0 CI `ruff check` step enforces, plus a few
+# trivially mechanical hygiene hooks. Contributors install via:
+#
+#     uv pip install pre-commit
+#     pre-commit install
+#
+# Then every `git commit` runs ruff + ruff-format + trailing-whitespace +
+# end-of-file-fixer locally, catching lint failures BEFORE they reach CI.
+# This was important during Phase-0 where CI is gated to manual trigger
+# (see .github/workflows/ci.yml): pre-commit keeps the main-branch bar
+# on ruff cleanliness even when CI isn't running per-push.
+
+repos:
+  # Ruff: the one linter that matters for this codebase. Covers
+  # pyflakes / pycodestyle / isort / flake8-bugbear / flake8-
+  # comprehensions / pyupgrade / flake8-unused-arguments / flake8-simplify
+  # via the `select = [...]` in pyproject.toml.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # Whitespace hygiene: tiny, fast, no configuration needed.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
