@@ -1,9 +1,27 @@
+# CI temporarily gated to manual trigger only.
+#
+# Rationale: the PR is being built up as many small commits. Firing CI on
+# every push adds round-trip delay that is not buying us correctness --
+# implementation is being validated locally against Python 3.12 / 3.13
+# BEFORE every push. Once all Phase-0 steps (through 0.9) land, the `on:`
+# block below is restored to push + pull_request and we do one final
+# full-matrix run.
+#
+# To re-enable, replace the `on:` block with:
+#
+#   on:
+#     push:
+#       branches: [main]
+#     pull_request:
+#     workflow_dispatch:
+#
+# To run a one-off now while CI is gated: use `gh workflow run ci.yml` or
+# the "Run workflow" button on the Actions page.
+
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
