@@ -1,0 +1,73 @@
+# Weekly upstream-drift check.
+#
+# Runs the contract tests in tests/contracts/ against the very latest
+# upstream ml4t-* wheels from PyPI (and kiteconnect / pandas-market-calendars).
+# The goal is to catch breaking changes in any of those packages within ~7
+# days of their release, long before we next touch adapter code.
+#
+# Unlike ci.yml this workflow is SCHEDULED (Monday 06:00 UTC) and also
+# supports workflow_dispatch for ad-hoc checks. A scheduled GitHub Actions
+# workflow only fires from the REPOSITORY DEFAULT BRANCH, so the cron
+# below will not actually run weekly until this file has been merged into
+# `main`. Until then, trigger manually with:
+#
+#     gh workflow run upstream-drift.yml
+#
+# or via the "Run workflow" button on the Actions page.
+
+name: Upstream Drift Check
+
+on:
+  schedule:
+    # Mondays 06:00 UTC -- early enough in the week that a Tuesday fix
+    # has time to land before the next week's release window.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Do NOT inherit the package-pretend-version env from the CI workflow; this
+# job explicitly uses `pip install --upgrade --pre` on upstream and then
+# installs our package with --pre -e, which correctly handles tag-less
+# source builds on its own.
+env:
+  SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ML4T_INDIA: "0.0.0.dev0"
+
+jobs:
+  drift:
+    name: Contract tests vs latest upstream
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Explicit --upgrade on the five ml4t-* packages forces pip to
+      # ignore any cached / already-installed version and fetch whatever
+      # PyPI has today. `--pre` remains mandatory because every one of
+      # them currently ships only pre-release versions.
+      - name: Install latest upstream ml4t-* + our dev deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade --pre \
+            ml4t-data \
+            ml4t-engineer \
+            ml4t-backtest \
+            ml4t-live \
+            ml4t-diagnostic
+          python -m pip install --pre -e '.[dev]'
+
+      - name: Print resolved upstream versions
+        run: |
+          python -m pip list | grep -E '^ml4t-' || true
+
+      # Run ONLY the contract tests. The rest of the suite (unit tests
+      # that exercise our own code) does not need to re-run here; this
+      # job cares specifically about upstream-API shape.
+      - name: Run contract tests
+        run: pytest tests/contracts/ -v -m contract
