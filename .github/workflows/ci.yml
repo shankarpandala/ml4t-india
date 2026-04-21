@@ -12,6 +12,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Set once at workflow level so every step in every job sees it. Any hatchling
+# / hatch-vcs / setuptools-scm invocation bypasses VCS inspection and uses
+# this version. Real release tags unset it by simply existing: setuptools-scm
+# prefers a real tag over PRETEND_VERSION when both are present... actually no,
+# PRETEND_VERSION wins, so we will remove this variable the first time we
+# tag a real release.
+env:
+  SETUPTOOLS_SCM_PRETEND_VERSION: "0.0.0.dev0"
+
 jobs:
   test:
     name: Python ${{ matrix.python-version }}${{ matrix.experimental && ' (experimental)' || '' }}
@@ -80,9 +89,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # hatch-vcs reads the tag history to derive the version. Without
-          # tags, the fallback_version in pyproject.toml and the env var
-          # below both cover the case.
+          # Deep history lets hatch-vcs see every tag that does exist. The
+          # workflow-level SETUPTOOLS_SCM_PRETEND_VERSION env var handles
+          # the tag-less case (fresh clones and this repo before its first
+          # release tag).
           fetch-depth: 0
 
       - name: Set up Python
@@ -93,14 +103,7 @@ jobs:
       - name: Install build backend
         run: pip install build
 
-      # SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<NORMALIZED_NAME> is read directly
-      # by setuptools-scm (which hatch-vcs wraps) and bypasses all VCS
-      # inspection. It is a belt-and-suspenders guarantee: even if the
-      # pyproject's `raw-options.fallback_version` turns out wrong for the
-      # hatch-vcs version that gets installed, this env var still wins.
       - name: Build sdist and universal wheel
-        env:
-          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ML4T_INDIA: "0.0.0.dev0"
         run: python -m build
 
       - name: Upload artifacts
