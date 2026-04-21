@@ -14,8 +14,13 @@ from ml4t.india.backtest.charges import (
     IndianChargesModel,
     ZerodhaChargesModel,
 )
+from ml4t.india.backtest.lot_sizing import floor_to_lot, round_to_lot
+from ml4t.india.backtest.presets import nse_india_config
 
 __all__ = [
     "IndianChargesModel",
     "ZerodhaChargesModel",
+    "floor_to_lot",
+    "nse_india_config",
+    "round_to_lot",
 ]
