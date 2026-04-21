@@ -74,14 +74,21 @@ requires-python = ">=3.12"
 # The five ml4t-* companion libraries are declared with lower bounds only.
 # We DO NOT hard-pin to specific versions: upstream bumps should flow through
 # naturally. Drift is caught by the weekly upstream-drift CI cron.
+#
+# The `a1` suffix on each ml4t-* pin is INTENTIONAL and must not be removed.
+# Upstream currently publishes only pre-release versions (0.1.0a*, 0.1.0b*).
+# PEP 440 requires the specifier itself to mention a pre-release in order
+# for the resolver to consider pre-releases, so `>=0.1.0` matches nothing
+# today and `>=0.1.0a1` matches every current and future version including
+# any eventual `0.1.0` stable release (alpha < beta < rc < final).
 # ----------------------------------------------------------------------------
 dependencies = [
     # ml4t ecosystem (consumed, not forked)
-    "ml4t-data>=0.1.0",
-    "ml4t-engineer>=0.1.0",
-    "ml4t-backtest>=0.1.0",
-    "ml4t-live>=0.1.0",
-    "ml4t-diagnostic>=0.1.0",
+    "ml4t-data>=0.1.0a1",
+    "ml4t-engineer>=0.1.0a1",
+    "ml4t-backtest>=0.1.0a1",
+    "ml4t-live>=0.1.0a1",
+    "ml4t-diagnostic>=0.1.0a1",
     # Broker SDK
     "kiteconnect>=5.0.0",
     # Market-session awareness (BSEExchangeCalendar subclass powers NSECalendar)
@@ -110,8 +117,9 @@ options = [
 ]
 
 # Plotly-driven tear sheets inherited from ml4t-diagnostic.
+# Note the matching `a1` pre-release-aware floor (see comment on core deps).
 viz = [
-    "ml4t-diagnostic[viz]>=0.1.0",
+    "ml4t-diagnostic[viz]>=0.1.0a1",
     "plotly>=5",
 ]
 
