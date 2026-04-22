@@ -17,5 +17,11 @@ upstream ``ml4t-data`` library. That two-step inheritance is deliberate:
 from __future__ import annotations
 
 from ml4t.india.data.base import IndianOHLCVProvider
+from ml4t.india.data.kite import KiteProvider
+from ml4t.india.data.kite_async import KiteAsyncProvider
 
-__all__ = ["IndianOHLCVProvider"]
+__all__ = [
+    "IndianOHLCVProvider",
+    "KiteAsyncProvider",
+    "KiteProvider",
+]

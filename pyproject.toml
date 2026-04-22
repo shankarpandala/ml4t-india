@@ -199,7 +199,7 @@ timeout = 120
 line-length = 100
 target-version = "py312"
 fix = true
-exclude = ["src/ml4t/india/_version.py"]
+exclude = ["src/ml4t/india/_version.py", "notebooks"]
 
 [tool.ruff.lint]
 select = [
@@ -240,14 +240,12 @@ source = ["src/ml4t/india"]
 omit = [
     "*/tests/*",
     "*/__init__.py",
-    "src/ml4t/india/_version.py",
+    "*/_version.py",
 ]
 
 [tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
+exclude_also = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
-    "@abstractmethod",
+    "if __name__ == .__main__.:",
 ]

@@ -72,10 +72,9 @@ plugins:
             show_root_full_path: false
             members_order: source
 
-# Navigation is deliberately minimal in Phase-0; every subsequent phase
-# adds its own section (data / backtest / live / options / diagnostic /
-# workflows). See PR #1 for the full plan.
 nav:
   - Home: index.md
+  - Quickstart: quickstart.md
+  - API reference: api.md
   - Ecosystem: ecosystem.md
-  - Phase-0 Scaffolding: phase-0.md
+  - Phase-0 notes: phase-0.md
