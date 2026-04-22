@@ -3,12 +3,11 @@
 Algorithmic trading for Indian markets (NSE, BSE) on top of the
 [ML4T library ecosystem](https://ml4trading.io/libraries/).
 
-!!! warning "Pre-alpha"
-    This is Phase-0 scaffolding. No Zerodha functionality is wired yet;
-    the visible surface today is the abstract-class layer that Phase 1+
-    concrete code will extend. See
-    [the PR roadmap](https://github.com/shankarpandala/ml4t-india/pull/1)
-    for the plan.
+!!! info "Pre-alpha, live-usable"
+    Phases 0&ndash;7 are merged: Kite data + broker + ticker feed,
+    option chain + Greeks, charges + lot-size helpers, research +
+    deployment pipelines, NSE calendar. Head to the
+    [Quickstart](quickstart.md) for end-to-end usage.
 
 ## What this library is
 
@@ -48,16 +47,22 @@ delegated upstream unchanged.
   for upstream protocols; `FakeKiteClient` drives unit-level isolation;
   recorded HTTP cassettes (Phase 3) drive integration.
 
-## What lives here today (Phase-0)
+## What lives here today
 
-* `ml4t.india.core` &mdash; Kite-wire enums (`Exchange`, `Product`,
-  `OrderType`, ...) and the `IndiaError` exception hierarchy.
-* `ml4t.india.data` &mdash; `IndianOHLCVProvider` abstract base.
-* `ml4t.india.live` &mdash; `IndianBrokerBase`, `IndianTickerFeedBase`
-  abstract bases.
-* `ml4t.india.kite` &mdash; `FakeKiteClient` test double.
+| Module | Contents |
+| ------ | -------- |
+| `ml4t.india.core` | Kite-wire enums (`Exchange`, `Product`, `OrderType`, ...) + `IndiaError` hierarchy |
+| `ml4t.india.kite` | `KiteClient` / `AsyncKiteClient` facade, rate limiter, login flow, instruments cache, `FakeKiteClient` |
+| `ml4t.india.data` | `IndianOHLCVProvider`, `KiteProvider`, `KiteAsyncProvider` |
+| `ml4t.india.backtest` | `IndianChargesModel`, `ZerodhaChargesModel`, `nse_india_config`, `round_to_lot`, `floor_to_lot` |
+| `ml4t.india.live` | `IndianBrokerBase`, `IndianTickerFeedBase`, `KiteBroker`, `KiteTickerFeed`, `PostbackHandler` |
+| `ml4t.india.options` | `OptionChain`, `compute_greeks` |
+| `ml4t.india.calendar` | `NSECalendar` over pandas-market-calendars |
+| `ml4t.india.workflows` | `ResearchPipeline`, `DeploymentPipeline` |
+| `ml4t.india.cli` | `ml4t-india login` + `whoami` entry points |
 
-See [Phase-0 Scaffolding](phase-0.md) for details.
+See the [Quickstart](quickstart.md) for end-to-end usage and the
+[API reference](api.md) for per-symbol documentation.
 
 ## Installation
 
@@ -70,7 +75,9 @@ pip install ml4t-india[all]
 
 ## Status
 
-No Zerodha functionality wired yet. Phase 1 adds the `KiteClient` gateway
-(rate limiter, retry, circuit breaker, auth flow); Phase 2 adds the real
-`KiteProvider`; Phase 4 adds the `KiteBroker`. Track progress on
-[PR #1](https://github.com/shankarpandala/ml4t-india/pull/1).
+Pre-alpha but functionally complete for Zerodha Phase-1 scope
+(equity cash + F&amp;O, historical data, live orders, streaming,
+option chain, Greeks). Python 3.12 and 3.13 CI lanes are green;
+3.14 and 3.13t/3.14t free-threaded lanes are experimental and
+tracked separately via [PR #2](https://github.com/shankarpandala/ml4t-india/pull/2).
+Phase 8 (hardening, property tests, &gt;=90% coverage) is next.
