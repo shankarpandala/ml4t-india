@@ -171,3 +171,49 @@ open_t, close_t = cal.session_bounds(dt.date(2026, 4, 22))
 
 Use the calendar to gate live-trading startup or generate backtest
 date ranges.
+
+## 8 &mdash; Real broker connection (local only)
+
+For a verified connection against your live Zerodha account, store your
+credentials in the OS keychain once and use them from Python without any
+hard-coded secrets:
+
+```bash
+# First time: stores api_key, api_secret, request_token, access_token
+python scripts/store_kite_credentials.py
+
+# Daily refresh (tokens expire at ~06:00 IST)
+python scripts/store_kite_credentials.py --refresh
+```
+
+Then in Python:
+
+```python
+import keyring
+from ml4t.india.kite.client import AsyncKiteClient
+from ml4t.india.live import KiteBroker
+
+SERVICE = "ml4t-india"
+api_key = keyring.get_password(SERVICE, "kite_api_key")
+access_token = keyring.get_password(SERVICE, "kite_access_token")
+
+client = AsyncKiteClient.from_api_key(api_key=api_key, access_token=access_token)
+broker = KiteBroker(client)
+
+import asyncio
+
+async def main():
+    await broker.connect()
+    print("cash:", await broker.get_cash_async())
+    print("positions:", await broker.get_positions_async())
+    await broker.disconnect()
+
+asyncio.run(main())
+```
+
+No credentials are passed as arguments or stored in source files. The keychain
+handles storage; `keyring.get_password()` retrieves them at runtime.
+
+See [docs/integration-testing.md](integration-testing.md) for setup
+instructions, daily token refresh, VPS/Linux configuration, and the full
+smoke test suite.

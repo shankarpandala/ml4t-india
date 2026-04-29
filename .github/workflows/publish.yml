@@ -1,0 +1,96 @@
+name: Publish
+
+# Triggers on version tags only — never on branch pushes.
+# Push a tag to release:
+#   git tag v0.1.0
+#   git push origin main --tags
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    # Scoped pretend-version for tag-less local/CI builds; on a real tag push
+    # hatch-vcs reads the tag directly so this env var is ignored.
+    env:
+      SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ML4T_INDIA: "0.0.0.dev0"
+    steps:
+      - name: Checkout (full history for hatch-vcs)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build backend
+        run: python -m pip install --upgrade pip build
+
+      - name: Build sdist and universal wheel
+        run: python -m build
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: build
+    # The "pypi" environment must be configured in the repository's GitHub
+    # Settings > Environments with the PyPI Trusted Publisher relationship.
+    # See docs/releasing.md for one-time PyPI setup instructions.
+    environment: pypi
+    permissions:
+      # Required for OIDC token exchange with PyPI — no stored API tokens.
+      id-token: write
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # No username/password/token needed — OIDC Trusted Publisher handles auth.
+        # PyPI verifies the GitHub OIDC JWT against the publisher configuration:
+        #   owner: shankarpandala
+        #   repository: ml4t-india
+        #   workflow: publish.yml
+        #   environment: pypi
+
+  validate-conda-recipe:
+    name: Validate conda recipe (lint only)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-activate-base: true
+          activate-environment: ""
+
+      - name: Install conda-build
+        shell: bash -el {0}
+        run: conda install -y conda-build
+
+      - name: Lint recipe (render only — no full build)
+        shell: bash -el {0}
+        run: |
+          conda render conda-recipe/meta.yaml
+          echo "Recipe renders cleanly."

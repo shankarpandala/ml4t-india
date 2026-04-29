@@ -6,7 +6,7 @@
 Algorithmic trading for Indian markets (NSE, BSE) on top of the
 [ML4T library ecosystem](https://ml4trading.io/libraries/).
 
-> **Status:** pre-alpha. Phase-0 scaffolding in progress.
+> **Status:** pre-alpha. Phase-1 Zerodha Kite integration complete. Publishing pipeline ready.
 
 ## What this is
 
@@ -63,9 +63,36 @@ pip install ml4t-india[all]
 
 ## Documentation
 
+- [Quickstart](docs/quickstart.md) — login, historical data, backtesting,
+  option chain, live trading, NSE calendar
+- [Integration Testing](docs/integration-testing.md) — real broker smoke
+  tests with OS keychain credential storage (no secrets in git)
+- [Releasing](docs/releasing.md) — tag-triggered PyPI publish via OIDC +
+  conda-forge recipe workflow
+
 Full documentation will be published to
 [https://shankarpandala.github.io/ml4t-india/](https://shankarpandala.github.io/ml4t-india/)
-once Phase-0 completes.
+once Phase-1 stabilises.
+
+## Integration Testing
+
+Real broker tests run locally against a live Zerodha Kite account. Credentials
+are stored in the OS keychain — never in `.env` files, config files, or git.
+
+```bash
+# Store credentials once (Windows Credential Manager / GNOME Keyring / macOS Keychain)
+python scripts/store_kite_credentials.py
+
+# Daily refresh (Kite tokens expire at ~06:00 IST)
+python scripts/store_kite_credentials.py --refresh
+
+# Run the 6-test smoke suite
+pytest tests/integration -m integration -v
+```
+
+Tests skip cleanly when credentials are absent. They never run on GitHub
+Actions. See [docs/integration-testing.md](docs/integration-testing.md) for
+VPS/Linux setup, troubleshooting, and security properties.
 
 ## License
 
