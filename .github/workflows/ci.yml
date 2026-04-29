@@ -61,15 +61,6 @@ jobs:
         include:
           - python-version: '3.14'
             experimental: true
-          # Free-threaded CPython (PEP 703 / PEP 779). 3.13t is the first
-          # officially released free-threaded build; 3.14t is its successor.
-          # Experimental because upstream wheels for numpy / polars /
-          # numba / pyarrow do not yet exist for free-threaded ABIs, so
-          # the full `.[dev]` install fails at the C-extension build step.
-          - python-version: '3.13t'
-            experimental: true
-          - python-version: '3.14t'
-            experimental: true
     continue-on-error: ${{ matrix.experimental }}
     steps:
       - name: Checkout
