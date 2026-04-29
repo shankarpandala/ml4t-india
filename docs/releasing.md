@@ -41,59 +41,43 @@ other branches are ignored by the workflow filter.
 
 ## PyPI — OIDC Trusted Publishers
 
-### One-time setup (done once per PyPI project)
+PyPI supports **pending trusted publishers** — you configure the trust
+relationship before the project exists. The first tag push creates the project
+and uploads in one step. No manual upload, no API token, ever.
 
-1. Create the project on PyPI (first upload only, see below).
-2. Go to **PyPI > Your projects > ml4t-india > Settings > Publishing**.
-3. Click **Add a new publisher** and fill in:
+### One-time setup (done once)
+
+1. Go to **https://pypi.org/manage/account/publishing/**.
+2. Click **Add a new pending publisher** and fill in:
 
    | Field | Value |
    |---|---|
-   | Owner | `shankarpandala` (your GitHub username) |
+   | PyPI project name | `ml4t-india` |
+   | Owner | `shankarpandala` |
    | Repository | `ml4t-india` |
    | Workflow name | `publish.yml` |
-   | Environment name | `pypi` (must match the `environment:` in the workflow) |
+   | Environment name | `pypi` |
 
-4. Save. PyPI now trusts GitHub Actions running `publish.yml` in the
-   `pypi` environment on this repository to upload to `ml4t-india`.
+3. Save. PyPI will now accept the first upload from this workflow with no
+   prior project record needed.
 
 No API token is ever created or stored. The trust relationship is purely
 identity-based (GitHub's OIDC JWT).
 
-### First upload
-
-Before the Trusted Publisher relationship exists on PyPI, the project record
-itself must be created. The easiest way is to upload manually once:
-
-```bash
-# Build locally
-hatch build
-
-# Upload with a traditional API token (one-time only)
-pip install twine
-twine upload dist/*
-```
-
-PyPI will prompt for your username and password (or use an API token created
-in your PyPI account settings). After this single upload, configure the
-Trusted Publisher above and delete the API token.
-
-All subsequent releases go through GitHub Actions with no stored secrets.
-
-### Automated publish workflow
+### Publish workflow
 
 `.github/workflows/publish.yml` triggers on `push` to tags matching `v*`:
 
-```
+```bash
 git tag v0.1.0
-git push origin main --tags
+git push origin v0.1.0
 ```
 
 The workflow:
 1. Checks out the tagged commit.
 2. Runs `hatch build` to produce `dist/*.whl` and `dist/*.tar.gz`.
 3. Calls `pypa/gh-action-pypi-publish@release/v1` which exchanges the GitHub
-   OIDC token for a short-lived PyPI upload token — no stored secrets needed.
+   OIDC token for a short-lived PyPI upload credential — no stored secrets needed.
 
 The `environment: pypi` declaration in the workflow gates the `id-token: write`
 permission to the PyPI environment, which can have additional protection rules
