@@ -56,8 +56,36 @@ src/ml4t/india/
 
 - Unit tests: pure, fast, fake-driven (`FakeKiteClient`).
 - Contract tests: verify our classes substitute for upstream protocols.
-- Cassette tests: recorded HTTP (VCR / respx) &mdash; no network in CI.
-- Integration tests: opt-in via `KITE_SANDBOX=1`, nightly job only.
+- Cassette tests: recorded HTTP (VCR / respx) — no network in CI.
+- Integration tests: real Zerodha Kite account, local/VPS only — see
+  `docs/integration-testing.md`.
 - Snapshot tests: assert the upstream API shape we depend on.
 
-See `docs/` (once Phase-0 completes) for the full contributor guide.
+### Running integration tests
+
+Integration tests require real Kite credentials stored in the OS keychain.
+They skip cleanly when credentials are absent (no failures on CI).
+
+```bash
+# First time: store credentials via OS keychain (Windows Credential Manager,
+# GNOME Keyring, or macOS Keychain -- never in files or git)
+python scripts/store_kite_credentials.py
+
+# Daily refresh (tokens expire at ~06:00 IST)
+python scripts/store_kite_credentials.py --refresh
+
+# Run the smoke suite
+pytest tests/integration -m integration -v
+```
+
+Integration tests **never run on GitHub Actions**. See
+`docs/integration-testing.md` for VPS/Linux setup and troubleshooting.
+
+### FakeKiteClient
+
+`FakeKiteClient` is the in-memory test double for `KiteConnect`. It fits the
+`_KiteSDK` structural protocol in `kite/client.py` and is used by all unit
+and contract tests. It never touches the network. When writing new unit tests,
+inject `FakeKiteClient` instead of a real SDK instance.
+
+See `docs/` for the full contributor guide.
