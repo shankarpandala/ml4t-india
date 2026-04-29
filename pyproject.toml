@@ -141,6 +141,7 @@ dev = [
     "ruff>=0.8",
     "ty",
     "pre-commit>=3",
+    "keyring>=25",
 ]
 
 # MkDocs Material + mkdocstrings (matching the companion libraries' doc style).
