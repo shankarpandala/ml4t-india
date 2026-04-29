@@ -12,6 +12,7 @@ import pytest
 
 try:
     import keyring
+    import keyring.errors
 
     _KEYRING_AVAILABLE = True
 except ImportError:
@@ -28,6 +29,14 @@ _SKIP_MSG = (
 )
 
 
+def _get_credential(key: str) -> str | None:
+    """Return a keychain value, or None if absent or no backend available."""
+    try:
+        return keyring.get_password(_SERVICE, key)
+    except keyring.errors.NoKeyringError:
+        return None
+
+
 @dataclass
 class KiteCredentials:
     api_key: str
@@ -41,17 +50,15 @@ def kite_credentials() -> KiteCredentials:
     if not _KEYRING_AVAILABLE:
         pytest.skip("keyring package not installed — run: pip install keyring>=25")
 
-    missing = [k for k in _REQUIRED if not keyring.get_password(_SERVICE, k)]
+    missing = [k for k in _REQUIRED if not _get_credential(k)]
     if missing:
         pytest.skip(f"{_SKIP_MSG} (missing: {', '.join(missing)})")
 
     return KiteCredentials(
-        api_key=keyring.get_password(_SERVICE, "kite_api_key"),  # type: ignore[arg-type]
-        api_secret=keyring.get_password(_SERVICE, "kite_api_secret"),  # type: ignore[arg-type]
-        request_token=keyring.get_password(  # type: ignore[arg-type]
-            _SERVICE, "kite_request_token"
-        ),
-        access_token=keyring.get_password(_SERVICE, "kite_access_token"),  # type: ignore[arg-type]
+        api_key=_get_credential("kite_api_key"),  # type: ignore[arg-type]
+        api_secret=_get_credential("kite_api_secret"),  # type: ignore[arg-type]
+        request_token=_get_credential("kite_request_token"),  # type: ignore[arg-type]
+        access_token=_get_credential("kite_access_token"),  # type: ignore[arg-type]
     )
 
 
