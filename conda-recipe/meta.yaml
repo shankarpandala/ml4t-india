@@ -1,0 +1,78 @@
+{% set version = "0.1.0" %}
+
+package:
+  name: ml4t-india
+  version: {{ version }}
+
+source:
+  url: https://pypi.org/packages/source/m/ml4t-india/ml4t_india-{{ version }}.tar.gz
+  # Update sha256 for each release:
+  #   pip download --no-deps --no-binary :all: ml4t-india=={{ version }}
+  #   sha256sum ml4t_india-{{ version }}.tar.gz
+  sha256: 0000000000000000000000000000000000000000000000000000000000000000
+
+build:
+  number: 0
+  noarch: python
+  script: {{ PYTHON }} -m pip install . --no-deps --no-build-isolation -vv
+
+requirements:
+  host:
+    - python >=3.12
+    - pip
+    - hatchling
+    - hatch-vcs
+
+  run:
+    - python >=3.12
+    # ml4t ecosystem — these must be on conda-forge before this recipe can be
+    # accepted in staged-recipes. Publish upstream packages first if absent.
+    - ml4t-data
+    - ml4t-engineer
+    - ml4t-backtest
+    - ml4t-live
+    - ml4t-diagnostic
+    # Broker SDK
+    - kiteconnect >=5.0.0
+    # Market-session awareness
+    - pandas-market-calendars >=4.3.0
+    # Data / transport stack (most are transitive; listed because we import directly)
+    - polars >=0.20
+    - pyarrow >=14
+    - pandas >=2
+    - httpx >=0.27,<1
+    - tenacity >=8
+    - pydantic >=2
+    - pydantic-settings >=2
+    - pyyaml >=6
+    - click >=8
+    - structlog >=23
+    - rich >=13
+    - pytz >=2024.1
+
+test:
+  imports:
+    - ml4t.india
+    - ml4t.india.kite.client
+    - ml4t.india.kite.auth
+    - ml4t.india.live.kite_broker
+    - ml4t.india.backtest
+    - ml4t.india.options
+    - ml4t.india.calendar
+    - ml4t.india.workflows
+  commands:
+    - ml4t-india --help
+
+about:
+  home: https://github.com/shankarpandala/ml4t-india
+  summary: Algorithmic trading for Indian markets (NSE, BSE) on top of the ml4t-* ecosystem
+  description: |
+    ml4t-india is a thin extension layer that adapts the ml4t companion
+    libraries to Indian equity and derivatives markets via the Zerodha
+    Kite Connect v3 broker API.
+  doc_url: https://shankarpandala.github.io/ml4t-india/
+  dev_url: https://github.com/shankarpandala/ml4t-india
+
+extra:
+  recipe-maintainers:
+    - shankarpandala
