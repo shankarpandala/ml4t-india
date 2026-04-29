@@ -214,19 +214,41 @@ Add a proper `[Unreleased]` section documenting all Phase-1 additions:
 #### `pyproject.toml`
 Add `keyring` to `[project.optional-dependencies].dev`.
 
-#### `.github/workflows/ci.yml`
-Add a `publish` job:
-- Triggered **only** by `workflow_dispatch` (never auto on push/PR)
-- Requires the `build` job to pass first
-- Uses `pypa/gh-action-pypi-publish` with `PYPI_API_TOKEN` GitHub secret
-- No version tag created automatically — tagging is a manual step performed locally before triggering the workflow
+#### `.github/workflows/publish.yml` (new file, separate from `ci.yml`)
+A dedicated publish workflow:
+- **Trigger:** `push: tags: ['v*']` — fires automatically when a version tag (e.g. `v0.1.0`) is pushed
+- **Jobs:**
+  1. `build` — checks out with full history (`fetch-depth: 0` so hatch-vcs sees the tag), builds wheel + sdist via `python -m build`
+  2. `publish-pypi` — uses `pypa/gh-action-pypi-publish@release/v1` with a PyPI **Trusted Publisher** (OIDC, no API token stored as a secret)
+  3. `publish-conda` — triggers a PR to `conda-forge/staged-recipes` (first release only); subsequent releases are handled automatically by the conda-forge bot
 
-#### Release workflow (documented in `docs/integration-testing.md`):
+#### `conda-recipe/meta.yaml` (new file in repo)
+A conda-forge recipe stored in the repo as the canonical reference. Covers:
+- Package name, version (from PyPI), source (PyPI sdist URL + SHA256)
+- Build: `pip install --no-deps`
+- Runtime requirements mirroring `pyproject.toml` dependencies
+- Test section: `import ml4t.india`
+- About section: description, license placeholder, dev URL
+
+This file is submitted as-is (with version pinned) to `conda-forge/staged-recipes` for the first release. After acceptance, conda-forge takes over maintenance of the feedstock.
+
+#### PyPI Trusted Publisher setup (one-time, before first release)
+On PyPI.org → Project settings → "Add a new publisher":
+- Publisher: GitHub Actions
+- Repository: `shankarpandala/ml4t-india`
+- Workflow filename: `publish.yml`
+- Environment name: `pypi` (matches the workflow's `environment:` field)
+
+No `PYPI_API_TOKEN` secret needed — OIDC handles authentication.
+
+#### Release workflow (documented in `docs/releasing.md`, new file):
 1. Update `CHANGELOG.md` — move `[Unreleased]` to `[x.y.z] - YYYY-MM-DD`
-2. `git tag vX.Y.Z && git push origin vX.Y.Z` — hatch-vcs picks up the tag
-3. Open GitHub → Actions → CI → Run workflow (manual trigger)
-4. After CI passes, trigger the `publish` workflow manually
-5. Verify on PyPI
+2. Commit: `git commit -am "chore: release vX.Y.Z"`
+3. Tag: `git tag vX.Y.Z && git push origin main --tags`
+4. GitHub Actions fires `publish.yml` automatically
+5. Wheel + sdist appear on PyPI within ~2 minutes
+6. For the first release: open a PR to `conda-forge/staged-recipes` with `conda-recipe/meta.yaml`
+7. After conda-forge acceptance, all future releases auto-update via the conda-forge bot
 
 ---
 
@@ -248,3 +270,5 @@ Add a `publish` job:
 - Automated daily token refresh (Kite access tokens expire at EOD; refresh is a manual step before running tests)
 - GitHub Actions integration tests (explicitly excluded by project policy)
 - Order execution with real fill intent (smoke test uses ₹1 limit price to guarantee no fill)
+- conda-forge feedstock maintenance after first acceptance (handled by conda-forge bot)
+- PyPI API token auth (replaced by OIDC Trusted Publisher)
