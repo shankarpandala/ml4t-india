@@ -22,6 +22,14 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 source = "vcs"
 
+[tool.hatch.metadata]
+# ml4t-models is pinned via git+https URL because it has no PyPI
+# release yet. Hatch refuses such "direct references" unless the
+# package opts in explicitly. Bump the SHA in the upstream-drift
+# cron when you want to track main; switch this back to false (and
+# drop the URL) the moment ml4t-models lands on PyPI.
+allow-direct-references = true
+
 [tool.hatch.build.hooks.vcs]
 version-file = "src/ml4t/india/_version.py"
 
@@ -96,6 +104,17 @@ dependencies = [
     "ml4t-backtest",
     "ml4t-live",
     "ml4t-diagnostic",
+    # Shared spec/contract package extracted from ml4t-data into its own
+    # PyPI release (FeedSpec, MarketDataSpec, artifact contracts). All
+    # five companion libraries depend on it now, so we pull it in
+    # directly rather than via a transitive of one of the five.
+    "ml4t-specs",
+    # ml4t-models -- finance-native model library (latent-factor / SDF /
+    # portfolio learners). NOT yet on PyPI; pinned to a known-good main
+    # SHA via git URL. The [integration] extra brings in ml4t-specs +
+    # polars, both already required here. Bump the SHA in the upstream-
+    # drift cron when you want to track main; do not pin to a branch.
+    "ml4t-models[integration] @ git+https://github.com/ml4t/models.git@a6a826cfca93a8859ed7261c8ab2cc90527f1911",
     # Broker SDK
     "kiteconnect>=5.0.0",
     # Market-session awareness (BSEExchangeCalendar subclass powers NSECalendar)
