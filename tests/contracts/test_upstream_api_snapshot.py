@@ -100,6 +100,7 @@ class TestMl4tLiveProtocols:
             "close_position_async",
             "submit_order_async",
             "cancel_order_async",
+            "replace_order_async",
             "get_pending_orders_async",
         }
         missing = required - set(dir(AsyncBrokerProtocol))
@@ -168,3 +169,30 @@ class TestMl4tBacktestTypes:
             "OrderType.MARKET is the default for submit_order_async; "
             "removing it would break every subclass of IndianBrokerBase."
         )
+
+    def test_order_type_moc_member_is_handled_when_present(self) -> None:
+        """``OrderType.MOC`` was added upstream 2026-04-27.
+
+        We do NOT require it to exist (older backtest versions can still
+        be installed), but if it does we must handle it in every broker
+        translator -- otherwise unit tests for MOC will fail at runtime.
+        """
+        from ml4t.backtest.types import OrderType
+
+        moc = getattr(OrderType, "MOC", None)
+        if moc is None:
+            pytest.skip("upstream OrderType has no MOC member yet")
+
+        # Each broker's _<broker>_order_type must accept MOC.
+        from ml4t.india.live.angelone_broker import _angel_order_type
+        from ml4t.india.live.fivepaisa_broker import _fivepaisa_order_type
+        from ml4t.india.live.kite_broker import _ml4t_to_kite_order_type
+        from ml4t.india.live.upstox_broker import _upstox_order_type
+
+        # Every translator should not raise on MOC (the wire string each
+        # broker chooses is broker-specific; we only check that the
+        # mapping exists at all).
+        _ml4t_to_kite_order_type(moc)
+        _upstox_order_type(moc)
+        _angel_order_type(moc)
+        _fivepaisa_order_type(moc)
