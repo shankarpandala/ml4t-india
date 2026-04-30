@@ -30,6 +30,7 @@ class FivePaisaClientProtocol(Protocol):
     def positions(self) -> list[dict[str, Any]]: ...
     def place_order(self, **kwargs: Any) -> dict[str, Any]: ...
     def cancel_order(self, exch_order_id: str) -> dict[str, Any]: ...
+    def modify_order(self, exch_order_id: str, **kwargs: Any) -> dict[str, Any]: ...
     def order_book(self) -> list[dict[str, Any]]: ...
 
 
@@ -45,11 +46,19 @@ _FIVEPAISA_STATUS_CODES: dict[str, OrderStatus] = {
 }
 
 
+# MOC (market-on-close, added upstream 2026-04) on 5paisa is routed via
+# IsAHOOrder (After-Hours Order); the wire fields stay identical to a
+# market order otherwise. Caller passes ``is_aho=True`` via kwargs to
+# actually flip the flag.
+_MOC = getattr(OrderType, "MOC", None)
+
+
 def _fivepaisa_order_type(ot: OrderType) -> tuple[bool, bool]:
     """Translate to (IsStopLossOrder, IsIOCOrder) pair 5paisa expects.
 
     Market + Limit use the same method with different price params;
-    stops flip IsStopLossOrder.
+    stops flip IsStopLossOrder. MOC behaves like MARKET on the wire;
+    AHO flag is set via kwargs.
     """
     if ot == OrderType.MARKET:
         return False, False
@@ -57,6 +66,8 @@ def _fivepaisa_order_type(ot: OrderType) -> tuple[bool, bool]:
         return False, False
     if ot in (OrderType.STOP, OrderType.STOP_LIMIT):
         return True, False
+    if _MOC is not None and ot == _MOC:
+        return False, False
     raise InvalidInputError(
         f"5paisa does not support order_type={ot.value!r}. "
         "TRAILING_STOP must be simulated strategy-side."
@@ -214,6 +225,49 @@ class FivePaisaBroker(IndianBrokerBase):
         if isinstance(result, dict):
             return result.get("Status", 1) == 0  # 0 == success in 5paisa
         return bool(result)
+
+    async def replace_order_async(
+        self,
+        order_id: str,
+        quantity: float | None = None,
+        limit_price: float | None = None,
+        stop_price: float | None = None,
+        **kwargs: Any,
+    ) -> Order:
+        """Modify a live 5paisa order via ``modify_order``.
+
+        5paisa returns ``{"ExchOrderID": ..., "Status": 0}`` on success
+        (``Status=0`` is OK). Only fields supplied are sent; everything
+        else stays at its current 5paisa-side value.
+        """
+        if quantity is None and limit_price is None and stop_price is None:
+            raise InvalidInputError(
+                "replace_order_async requires at least one of "
+                "quantity / limit_price / stop_price (got none)"
+            )
+        payload: dict[str, Any] = dict(kwargs)
+        if quantity is not None:
+            payload["Qty"] = int(abs(quantity))
+        if limit_price is not None:
+            payload["Price"] = limit_price
+        if stop_price is not None:
+            payload["StopLossPrice"] = stop_price
+        result = await asyncio.to_thread(
+            lambda: self._client.modify_order(order_id, **payload)
+        )
+        echoed = str(
+            result.get("ExchOrderID", order_id) if isinstance(result, dict) else order_id
+        )
+        return Order(
+            asset="",
+            side=OrderSide.BUY,
+            quantity=float(payload.get("Qty", 0) or 0),
+            order_type=OrderType.MARKET,
+            limit_price=limit_price,
+            stop_price=stop_price,
+            order_id=echoed,
+            status=OrderStatus.PENDING,
+        )
 
     async def get_pending_orders_async(self) -> list[Order]:
         rows = await asyncio.to_thread(self._client.order_book) or []
