@@ -69,12 +69,22 @@ _KITE_STATUS: dict[str, OrderStatus] = {
 }
 
 
+# MOC (market-on-close) was added to upstream OrderType in 2026-04. Use
+# getattr so we keep working on older backtest packages where the member
+# is absent -- _MOC will be None and the comparison below silently skips.
+_MOC = getattr(OrderType, "MOC", None)
+
+
 def _ml4t_to_kite_order_type(ot: OrderType) -> KiteOrderType:
     """Translate upstream ``OrderType`` into Kite's enum.
 
     Raises :class:`InvalidInputError` for order types Kite does not
     support (``TRAILING_STOP``). STOP / STOP_LIMIT both map to Kite's
-    SL_M / SL respectively.
+    SL_M / SL respectively. ``MOC`` (market-on-close, added upstream
+    2026-04) maps to Kite ``MARKET`` -- callers must additionally pass
+    ``variety="auction"`` via kwargs to route through NSE's closing-
+    auction window (15:40-16:00 IST); without that, the order behaves
+    as a regular market order.
     """
     if ot == OrderType.MARKET:
         return KiteOrderType.MARKET
@@ -84,6 +94,8 @@ def _ml4t_to_kite_order_type(ot: OrderType) -> KiteOrderType:
         return KiteOrderType.SL_M
     if ot == OrderType.STOP_LIMIT:
         return KiteOrderType.SL
+    if _MOC is not None and ot == _MOC:
+        return KiteOrderType.MARKET
     raise InvalidInputError(
         f"Kite has no native order-type equivalent for {ot.value!r}. "
         "TRAILING_STOP must be simulated strategy-side."
@@ -380,6 +392,54 @@ class KiteBroker(IndianBrokerBase):
         """
         echoed = await self._client.cancel_order(str(variety), order_id)
         return str(echoed) == str(order_id)
+
+    async def replace_order_async(
+        self,
+        order_id: str,
+        quantity: float | None = None,
+        limit_price: float | None = None,
+        stop_price: float | None = None,
+        **kwargs: Any,
+    ) -> Order:
+        """Modify a live order via Kite's ``modify_order``.
+
+        Required by upstream ``AsyncBrokerProtocol``. Only fields that
+        are not ``None`` are sent to Kite -- the broker leaves untouched
+        fields at their current value.
+
+        Kite's ``modify_order`` accepts ``variety`` + ``order_id`` plus
+        any of the place-order fields the caller wants to change. We
+        default to ``Variety.REGULAR``; pass ``variety=...`` via
+        ``**kwargs`` for CO / iceberg / AMO modifications.
+
+        Returns a fresh :class:`Order` reflecting the requested change;
+        ``status`` stays ``PENDING`` because Kite acknowledges the
+        modification asynchronously via the postback stream.
+        """
+        variety = kwargs.pop("variety", Variety.REGULAR)
+        payload: dict[str, Any] = dict(kwargs)
+        if quantity is not None:
+            payload["quantity"] = int(abs(quantity))
+        if limit_price is not None:
+            payload["price"] = limit_price
+        if stop_price is not None:
+            payload["trigger_price"] = stop_price
+        if not payload:
+            raise InvalidInputError(
+                "replace_order_async requires at least one of "
+                "quantity / limit_price / stop_price (got none)"
+            )
+        echoed = await self._client.modify_order(str(variety), order_id, **payload)
+        return Order(
+            asset="",
+            side=OrderSide.BUY,
+            quantity=float(payload.get("quantity", 0) or 0),
+            order_type=OrderType.MARKET,
+            limit_price=limit_price,
+            stop_price=stop_price,
+            order_id=str(echoed),
+            status=OrderStatus.PENDING,
+        )
 
     async def get_pending_orders_async(self) -> list[Order]:
         """All open / trigger-pending orders (everything not terminal).
