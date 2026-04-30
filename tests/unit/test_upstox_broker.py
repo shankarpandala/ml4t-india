@@ -197,6 +197,33 @@ class TestCancel:
         assert await broker.cancel_order_async(order.order_id) is True
 
 
+class TestReplace:
+    async def test_replace_quantity(
+        self, broker: UpstoxBroker, sdk: FakeUpstoxClient
+    ) -> None:
+        # Add modify_order recorder to the fake.
+        sdk.modify_order = lambda order_id, **kw: order_id  # type: ignore[attr-defined]  # noqa: ARG005
+        original = await broker.submit_order_async(asset="NSE:RELIANCE", quantity=10)
+        replaced = await broker.replace_order_async(original.order_id, quantity=20)
+        assert replaced.order_id == original.order_id
+
+    async def test_replace_no_args_rejected(self, broker: UpstoxBroker) -> None:
+        with pytest.raises(InvalidInputError, match="at least one"):
+            await broker.replace_order_async("FAKE")
+
+
+class TestMOC:
+    async def test_moc_market_translation(
+        self, broker: UpstoxBroker, sdk: FakeUpstoxClient
+    ) -> None:
+        moc = getattr(OrderType, "MOC", None)
+        if moc is None:
+            pytest.skip("upstream OrderType has no MOC yet")
+        await broker.submit_order_async(asset="NSE:RELIANCE", quantity=10, order_type=moc)
+        place = [c for c in sdk.calls if c[0] == "place_order"]
+        assert place[0][2]["order_type"] == "MARKET"
+
+
 class TestPending:
     async def test_only_open_returned(self, broker: UpstoxBroker, sdk: FakeUpstoxClient) -> None:
         sdk._orders = [
