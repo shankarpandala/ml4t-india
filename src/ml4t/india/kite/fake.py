@@ -229,6 +229,21 @@ class FakeKiteClient:
                 break
         return order_id
 
+    def modify_order(self, variety: str, order_id: str, **kwargs: Any) -> str:
+        """Apply kwargs to an existing fake order in place.
+
+        Mirrors the real Kite ``modify_order`` shape: returns the
+        ``order_id`` unchanged. Only fields supplied in ``kwargs`` are
+        updated; unsupplied fields keep their current value.
+        """
+        self._record("modify_order", variety, order_id, **kwargs)
+        for order in self._orders:
+            if order["order_id"] == order_id:
+                order.update(kwargs)
+                order["status"] = "MODIFY PENDING"
+                break
+        return order_id
+
     def orders(self) -> list[dict[str, Any]]:
         """Return a copy of the in-memory order book."""
         self._record("orders")

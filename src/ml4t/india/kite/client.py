@@ -143,6 +143,20 @@ class KiteClient:
     def cancel_order(self, variety: str, order_id: str, **kwargs: Any) -> str:
         return self._call("cancel_order", variety, order_id, **kwargs)
 
+    def modify_order(
+        self,
+        variety: str,
+        order_id: str,
+        **kwargs: Any,
+    ) -> str:
+        """Modify an existing order's quantity / price / trigger_price.
+
+        Kite accepts the same kwargs as ``place_order`` for the fields
+        being changed (``quantity``, ``price``, ``trigger_price``,
+        ``order_type``). Returns the order_id (same as input).
+        """
+        return self._call("modify_order", variety, order_id, **kwargs)
+
     def orders(self) -> list[dict[str, Any]]:
         return self._call("orders")
 
@@ -234,6 +248,13 @@ class AsyncKiteClient:
     ) -> str:
         return await asyncio.to_thread(
             lambda: self._sync.cancel_order(variety, order_id, **kwargs)
+        )
+
+    async def modify_order(
+        self, variety: str, order_id: str, **kwargs: Any
+    ) -> str:
+        return await asyncio.to_thread(
+            lambda: self._sync.modify_order(variety, order_id, **kwargs)
         )
 
     async def orders(self) -> list[dict[str, Any]]:
