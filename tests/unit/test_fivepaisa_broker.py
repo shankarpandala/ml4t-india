@@ -155,6 +155,44 @@ class TestOrders:
         assert await broker.cancel_order_async(order.order_id) is True
 
 
+class TestReplace:
+    async def test_replace_quantity(
+        self, broker: FivePaisaBroker, sdk: FakeFivePaisaClient
+    ) -> None:
+        sdk.modify_order = lambda exch_order_id, **kw: {  # type: ignore[attr-defined]  # noqa: ARG005
+            "ExchOrderID": exch_order_id,
+            "Status": 0,
+        }
+        original = await broker.submit_order_async(
+            asset="NSE:RELIANCE", quantity=10, scrip_code=2885
+        )
+        replaced = await broker.replace_order_async(original.order_id, quantity=20)
+        assert replaced.order_id == original.order_id
+
+    async def test_replace_no_args_rejected(self, broker: FivePaisaBroker) -> None:
+        with pytest.raises(InvalidInputError, match="at least one"):
+            await broker.replace_order_async("FAKE")
+
+
+class TestMOC:
+    async def test_moc_market_translation(
+        self, broker: FivePaisaBroker, sdk: FakeFivePaisaClient
+    ) -> None:
+        moc = getattr(OrderType, "MOC", None)
+        if moc is None:
+            pytest.skip("upstream OrderType has no MOC yet")
+        await broker.submit_order_async(
+            asset="NSE:RELIANCE",
+            quantity=10,
+            order_type=moc,
+            scrip_code=2885,
+        )
+        place = [c for c in sdk.calls if c[0] == "place_order"]
+        # MOC routes through the same place_order; IsStopLossOrder must not
+        # be flipped on (that's for STOP / STOP_LIMIT).
+        assert place[0][2]["IsStopLossOrder"] is False
+
+
 class TestPending:
     async def test_only_pending_returned(
         self, broker: FivePaisaBroker, sdk: FakeFivePaisaClient

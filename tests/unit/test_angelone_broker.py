@@ -143,6 +143,53 @@ class TestOrders:
         assert await broker.cancel_order_async(order.order_id) is True
 
 
+class TestReplace:
+    async def test_replace_quantity(
+        self, broker: AngelOneBroker, sdk: FakeAngelClient
+    ) -> None:
+        sdk.modifyOrder = lambda orderparams: {  # type: ignore[attr-defined]
+            "data": {"orderid": orderparams["orderid"]}
+        }
+        original = await broker.submit_order_async(
+            asset="NSE:RELIANCE", quantity=10, symboltoken="2885"
+        )
+        replaced = await broker.replace_order_async(
+            original.order_id,
+            quantity=20,
+            symboltoken="2885",
+            exchange="NSE",
+            tradingsymbol="RELIANCE",
+            producttype="DELIVERY",
+            duration="DAY",
+            variety="NORMAL",
+        )
+        assert replaced.order_id == original.order_id
+
+    async def test_replace_no_args_rejected(self, broker: AngelOneBroker) -> None:
+        with pytest.raises(InvalidInputError, match="at least one"):
+            await broker.replace_order_async("FAKE")
+
+
+class TestMOC:
+    async def test_moc_market_translation(
+        self, broker: AngelOneBroker, sdk: FakeAngelClient
+    ) -> None:
+        moc = getattr(OrderType, "MOC", None)
+        if moc is None:
+            pytest.skip("upstream OrderType has no MOC yet")
+        await broker.submit_order_async(
+            asset="NSE:RELIANCE",
+            quantity=10,
+            order_type=moc,
+            symboltoken="2885",
+            variety="AMO",
+        )
+        place = [c for c in sdk.calls if c[0] == "placeOrder"]
+        params = place[0][1][0]
+        assert params["ordertype"] == "MARKET"
+        assert params["variety"] == "AMO"
+
+
 class TestPending:
     async def test_only_open_returned(self, broker: AngelOneBroker, sdk: FakeAngelClient) -> None:
         sdk._orders["data"] = [

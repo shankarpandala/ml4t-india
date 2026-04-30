@@ -297,6 +297,56 @@ class TestCancelOrder:
         assert cancels[0].args == ("regular", order.order_id)
 
 
+class TestReplaceOrder:
+    async def test_replace_quantity(
+        self, broker: KiteBroker, fake_sdk: FakeKiteClient
+    ) -> None:
+        original = await broker.submit_order_async(asset="NSE:RELIANCE", quantity=10)
+        replaced = await broker.replace_order_async(original.order_id, quantity=20)
+        assert replaced.order_id == original.order_id
+        modify_calls = [c for c in fake_sdk.calls if c.method == "modify_order"]
+        assert modify_calls[0].args == ("regular", original.order_id)
+        assert modify_calls[0].kwargs["quantity"] == 20
+
+    async def test_replace_limit_price(
+        self, broker: KiteBroker, fake_sdk: FakeKiteClient
+    ) -> None:
+        original = await broker.submit_order_async(
+            asset="NSE:RELIANCE",
+            quantity=10,
+            order_type=OrderType.LIMIT,
+            limit_price=2500.0,
+        )
+        await broker.replace_order_async(original.order_id, limit_price=2510.0)
+        modify_calls = [c for c in fake_sdk.calls if c.method == "modify_order"]
+        assert modify_calls[0].kwargs["price"] == 2510.0
+
+    async def test_replace_with_no_changes_rejected(self, broker: KiteBroker) -> None:
+        original = await broker.submit_order_async(asset="NSE:RELIANCE", quantity=10)
+        with pytest.raises(InvalidInputError, match="at least one"):
+            await broker.replace_order_async(original.order_id)
+
+
+class TestMOCOrders:
+    async def test_moc_translates_to_market(
+        self, broker: KiteBroker, fake_sdk: FakeKiteClient
+    ) -> None:
+        moc = getattr(OrderType, "MOC", None)
+        if moc is None:
+            import pytest as _pytest
+
+            _pytest.skip("upstream OrderType has no MOC yet")
+        await broker.submit_order_async(
+            asset="NSE:RELIANCE",
+            quantity=10,
+            order_type=moc,
+            variety="auction",  # NSE closing-auction window
+        )
+        place = [c for c in fake_sdk.calls if c.method == "place_order"]
+        assert place[0].kwargs["order_type"] == "MARKET"
+        assert place[0].args == ("auction",)
+
+
 class TestGetPendingOrders:
     async def test_filters_out_terminal(self, broker: KiteBroker, fake_sdk: FakeKiteClient) -> None:
         # Two completed (auto-filled by fake), then we add one pending manually.

@@ -43,6 +43,7 @@ class UpstoxClientProtocol(Protocol):
     def get_positions(self) -> list[dict[str, Any]]: ...
     def place_order(self, **kwargs: Any) -> str: ...
     def cancel_order(self, order_id: str, **kwargs: Any) -> str: ...
+    def modify_order(self, order_id: str, **kwargs: Any) -> str: ...
     def get_order_book(self) -> list[dict[str, Any]]: ...
 
 
@@ -57,6 +58,14 @@ _UPSTOX_STATUS: dict[str, OrderStatus] = {
 }
 
 
+# MOC (market-on-close) was added to upstream OrderType in 2026-04. Use
+# getattr so we keep working on older backtest packages where the member
+# is absent. Upstox routes MOC via product="D" + after-market flag; we
+# map the wire string to MARKET and the caller is expected to pass
+# ``is_amo=True`` (or appropriate Upstox slot field) via kwargs.
+_MOC = getattr(OrderType, "MOC", None)
+
+
 def _upstox_order_type(ot: OrderType) -> str:
     """Upstream OrderType -> Upstox wire value."""
     mapping = {
@@ -65,12 +74,14 @@ def _upstox_order_type(ot: OrderType) -> str:
         OrderType.STOP: "SL-M",
         OrderType.STOP_LIMIT: "SL",
     }
-    if ot not in mapping:
-        raise InvalidInputError(
-            f"Upstox does not support order_type={ot.value!r}. "
-            "TRAILING_STOP must be simulated strategy-side."
-        )
-    return mapping[ot]
+    if ot in mapping:
+        return mapping[ot]
+    if _MOC is not None and ot == _MOC:
+        return "MARKET"
+    raise InvalidInputError(
+        f"Upstox does not support order_type={ot.value!r}. "
+        "TRAILING_STOP must be simulated strategy-side."
+    )
 
 
 def _split_asset(asset: str) -> tuple[str, str]:
@@ -213,6 +224,46 @@ class UpstoxBroker(IndianBrokerBase):
     async def cancel_order_async(self, order_id: str) -> bool:
         echoed = await asyncio.to_thread(self._client.cancel_order, order_id)
         return str(echoed) == str(order_id)
+
+    async def replace_order_async(
+        self,
+        order_id: str,
+        quantity: float | None = None,
+        limit_price: float | None = None,
+        stop_price: float | None = None,
+        **kwargs: Any,
+    ) -> Order:
+        """Modify a live Upstox order via ``modify_order``.
+
+        Required by upstream ``AsyncBrokerProtocol``. Only fields that
+        are not ``None`` are sent; unsupplied fields keep their current
+        Upstox-side value.
+        """
+        payload: dict[str, Any] = dict(kwargs)
+        if quantity is not None:
+            payload["quantity"] = int(abs(quantity))
+        if limit_price is not None:
+            payload["price"] = limit_price
+        if stop_price is not None:
+            payload["trigger_price"] = stop_price
+        if not payload:
+            raise InvalidInputError(
+                "replace_order_async requires at least one of "
+                "quantity / limit_price / stop_price (got none)"
+            )
+        echoed = await asyncio.to_thread(
+            lambda: self._client.modify_order(order_id, **payload)
+        )
+        return Order(
+            asset="",
+            side=OrderSide.BUY,
+            quantity=float(payload.get("quantity", 0) or 0),
+            order_type=OrderType.MARKET,
+            limit_price=limit_price,
+            stop_price=stop_price,
+            order_id=str(echoed),
+            status=OrderStatus.PENDING,
+        )
 
     async def get_pending_orders_async(self) -> list[Order]:
         rows = await asyncio.to_thread(self._client.get_order_book) or []

@@ -107,11 +107,23 @@ class KiteProvider(IndianOHLCVProvider):
         client: KiteClient,
         instruments: InstrumentsCache,
         default_exchange: Exchange | str = Exchange.NSE,
+        validation_mode: str = "warn",
     ) -> None:
-        super().__init__()
+        # Upstream `BaseProvider` (v0.1.0b10+) defaults to "drop" -- silently
+        # discards malformed OHLCV rows. India data with circuit-filter halts
+        # routinely produces partial bars; we explicitly opt into "warn" so
+        # the structured logger surfaces drops without halting the pipeline.
+        # Callers can pass "strict" for audit lanes that must not accept any
+        # data quality compromise. Defensive: older BaseProvider versions
+        # don't accept the kwarg, so try-twice on TypeError.
+        try:
+            super().__init__(validation_mode=validation_mode)
+        except TypeError:
+            super().__init__()
         self._client = client
         self._instruments = instruments
         self._default_exchange = str(default_exchange)
+        self._validation_mode = validation_mode
 
     @property
     def name(self) -> str:

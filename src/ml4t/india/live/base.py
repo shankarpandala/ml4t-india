@@ -129,6 +129,27 @@ class IndianBrokerBase(ABC):
         """
 
     @abstractmethod
+    async def replace_order_async(
+        self,
+        order_id: str,
+        quantity: float | None = None,
+        limit_price: float | None = None,
+        stop_price: float | None = None,
+        **kwargs: Any,
+    ) -> Order:
+        """Modify a live order's quantity / price / stop in place.
+
+        Required by upstream ``AsyncBrokerProtocol`` since 2026-04. Each
+        Indian broker SDK exposes this via a different verb
+        (``modify_order`` for Kite + Upstox + 5paisa,
+        ``modifyOrder`` for Angel SmartAPI). Returns the updated order.
+
+        Implementations MUST raise :class:`InvalidInputError` on
+        unsupported transitions (e.g., trying to change order_type
+        post-submit, which most broker APIs reject).
+        """
+
+    @abstractmethod
     async def get_pending_orders_async(self) -> list[Order]:
         """Return orders that are open / pending execution."""
 
