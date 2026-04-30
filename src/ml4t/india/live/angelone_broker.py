@@ -31,6 +31,7 @@ class AngelClientProtocol(Protocol):
     def position(self) -> dict[str, Any]: ...
     def placeOrder(self, orderparams: dict[str, Any]) -> str: ...
     def cancelOrder(self, order_id: str, variety: str = ...) -> dict[str, Any]: ...
+    def modifyOrder(self, orderparams: dict[str, Any]) -> dict[str, Any]: ...
     def orderBook(self) -> dict[str, Any]: ...
 
 
@@ -45,6 +46,13 @@ _ANGEL_STATUS: dict[str, OrderStatus] = {
 }
 
 
+# MOC (market-on-close, added upstream 2026-04) -- Angel routes via
+# variety="AMO" + ordertype="MARKET". Caller passes ``variety="AMO"``
+# explicitly via kwargs to actually hit the AMO slot; we accept the
+# OrderType and translate it to MARKET on the wire.
+_MOC = getattr(OrderType, "MOC", None)
+
+
 def _angel_order_type(ot: OrderType) -> str:
     mapping = {
         OrderType.MARKET: "MARKET",
@@ -52,12 +60,14 @@ def _angel_order_type(ot: OrderType) -> str:
         OrderType.STOP: "STOPLOSS_MARKET",
         OrderType.STOP_LIMIT: "STOPLOSS_LIMIT",
     }
-    if ot not in mapping:
-        raise InvalidInputError(
-            f"Angel One does not support order_type={ot.value!r}. "
-            "TRAILING_STOP must be simulated strategy-side."
-        )
-    return mapping[ot]
+    if ot in mapping:
+        return mapping[ot]
+    if _MOC is not None and ot == _MOC:
+        return "MARKET"
+    raise InvalidInputError(
+        f"Angel One does not support order_type={ot.value!r}. "
+        "TRAILING_STOP must be simulated strategy-side."
+    )
 
 
 def _split_asset(asset: str) -> tuple[str, str]:
@@ -210,6 +220,52 @@ class AngelOneBroker(IndianBrokerBase):
             data = result.get("data", result)
             return bool(data.get("status", result.get("status", False)))
         return bool(result)
+
+    async def replace_order_async(
+        self,
+        order_id: str,
+        quantity: float | None = None,
+        limit_price: float | None = None,
+        stop_price: float | None = None,
+        **kwargs: Any,
+    ) -> Order:
+        """Modify a live Angel order via ``modifyOrder``.
+
+        SmartAPI's ``modifyOrder`` expects the same orderparams shape
+        as ``placeOrder``, with the fields being changed plus the
+        ``orderid`` field. Caller must supply any additional Angel-
+        required fields (``variety``, ``symboltoken``, ``exchange``,
+        ``tradingsymbol``, ``producttype``, ``duration``) via kwargs;
+        Angel rejects partial modifies that omit them.
+        """
+        if quantity is None and limit_price is None and stop_price is None:
+            raise InvalidInputError(
+                "replace_order_async requires at least one of "
+                "quantity / limit_price / stop_price (got none)"
+            )
+        orderparams: dict[str, Any] = {"orderid": order_id, **kwargs}
+        if quantity is not None:
+            orderparams["quantity"] = int(abs(quantity))
+        if limit_price is not None:
+            orderparams["price"] = str(limit_price)
+        if stop_price is not None:
+            orderparams["triggerprice"] = str(stop_price)
+        result = await asyncio.to_thread(self._client.modifyOrder, orderparams)
+        echoed = (
+            result.get("data", {}).get("orderid", order_id)
+            if isinstance(result, dict)
+            else order_id
+        )
+        return Order(
+            asset="",
+            side=OrderSide.BUY,
+            quantity=float(orderparams.get("quantity", 0) or 0),
+            order_type=OrderType.MARKET,
+            limit_price=limit_price,
+            stop_price=stop_price,
+            order_id=str(echoed),
+            status=OrderStatus.PENDING,
+        )
 
     async def get_pending_orders_async(self) -> list[Order]:
         data = await asyncio.to_thread(self._client.orderBook)
