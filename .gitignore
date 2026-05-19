@@ -205,3 +205,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# hatch-vcs auto-generated version file (see pyproject.toml [tool.hatch.build.hooks.vcs])
+src/ml4t/india/_version.py
