@@ -196,3 +196,31 @@ class TestMl4tBacktestTypes:
         _upstox_order_type(moc)
         _angel_order_type(moc)
         _fivepaisa_order_type(moc)
+
+
+class TestKiteconnectAutoSlice:
+    """``KiteConnect.place_autoslice_order`` was added in kiteconnect 5.2.
+
+    Our :class:`~ml4t.india.kite.client.KiteClient` facade wraps it, so the
+    method must remain present upstream. If kiteconnect drops or renames it,
+    we want this assertion to fail loudly before the broker layer does.
+    """
+
+    def test_place_autoslice_order_present_on_sdk(self) -> None:
+        from kiteconnect import KiteConnect
+
+        assert hasattr(KiteConnect, "place_autoslice_order"), (
+            "kiteconnect.KiteConnect dropped place_autoslice_order; "
+            "KiteClient.place_autoslice_order and "
+            "KiteBroker.submit_order_async(auto_slice=True) depend on it."
+        )
+
+    def test_kite_client_facade_wraps_it(self) -> None:
+        from ml4t.india.kite.client import AsyncKiteClient, KiteClient
+
+        assert hasattr(KiteClient, "place_autoslice_order"), (
+            "KiteClient facade lost its place_autoslice_order wrapper."
+        )
+        assert hasattr(AsyncKiteClient, "place_autoslice_order"), (
+            "AsyncKiteClient facade lost its place_autoslice_order wrapper."
+        )

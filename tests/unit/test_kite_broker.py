@@ -277,6 +277,34 @@ class TestSubmitOrder:
         with pytest.raises(InvalidInputError, match="nonzero"):
             await broker.submit_order_async(asset="NSE:RELIANCE", quantity=0)
 
+    async def test_auto_slice_routes_through_autoslice_endpoint(
+        self, broker: KiteBroker, fake_sdk: FakeKiteClient
+    ) -> None:
+        """auto_slice=True calls place_autoslice_order, not place_order."""
+        fake_sdk.set_freeze_limit(1800)
+        order = await broker.submit_order_async(
+            asset="NFO:NIFTY26MAYFUT",
+            quantity=5400,  # 3x the freeze cap
+            auto_slice=True,
+        )
+        place = [c for c in fake_sdk.calls if c.method == "place_order"]
+        autoslice = [c for c in fake_sdk.calls if c.method == "place_autoslice_order"]
+        assert place == []
+        assert len(autoslice) == 1
+        assert autoslice[0].kwargs["quantity"] == 5400
+        # Order.order_id reflects the parent id, child rows live on the book.
+        assert order.order_id.startswith("FAKE-AS-")
+        # Three child legs hit the order book.
+        rows = [o for o in fake_sdk._orders if o.get("parent_order_id") == order.order_id]
+        assert [r["quantity"] for r in rows] == [1800, 1800, 1800]
+
+    async def test_auto_slice_default_off_still_uses_place_order(
+        self, broker: KiteBroker, fake_sdk: FakeKiteClient
+    ) -> None:
+        await broker.submit_order_async(asset="NSE:RELIANCE", quantity=10)
+        assert any(c.method == "place_order" for c in fake_sdk.calls)
+        assert all(c.method != "place_autoslice_order" for c in fake_sdk.calls)
+
     async def test_bare_symbol_rejected(self, broker: KiteBroker) -> None:
         with pytest.raises(InvalidInputError, match="EXCHANGE:SYMBOL"):
             await broker.submit_order_async(asset="RELIANCE", quantity=10)

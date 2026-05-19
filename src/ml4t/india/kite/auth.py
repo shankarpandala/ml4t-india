@@ -52,8 +52,9 @@ from kiteconnect import exceptions as kexc
 
 from ml4t.india.kite.errors import translate
 
-#: ``Asia/Kolkata`` offset used to compute token expiry without pulling
-#: in ``pytz``. Kite rotates tokens at approximately 06:00 IST daily.
+#: ``Asia/Kolkata`` offset used to compute token expiry, built from the
+#: stdlib ``datetime.timezone``. Kite rotates tokens at approximately
+#: 06:00 IST daily.
 _IST = dt.timezone(dt.timedelta(hours=5, minutes=30), name="IST")
 
 #: Hour of day (IST) after which yesterday's token is considered expired.
