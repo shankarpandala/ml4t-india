@@ -126,6 +126,42 @@ class TestOrderLifecycle:
         assert orders[0]["status"] == "COMPLETE"
         assert orders[0]["price"] == 4000.0
 
+    def test_place_autoslice_splits_into_legs(self) -> None:
+        c = FakeKiteClient()
+        c.set_freeze_limit(1800)
+        response = c.place_autoslice_order(
+            "regular",
+            tradingsymbol="NIFTY26MAYFUT",
+            exchange="NFO",
+            transaction_type="BUY",
+            quantity=5000,
+            product="NRML",
+            order_type="MARKET",
+        )
+        # 5000 quantity at freeze=1800 -> legs of 1800, 1800, 1400.
+        assert response["order_id"].startswith("FAKE-AS-")
+        child_ids = [child["order_id"] for child in response["children"]]
+        assert len(child_ids) == 3
+        book = c.orders()
+        leg_rows = [o for o in book if o["order_id"] in child_ids]
+        assert [r["quantity"] for r in leg_rows] == [1800, 1800, 1400]
+        # Every child carries the parent_order_id back-pointer.
+        assert {r["parent_order_id"] for r in leg_rows} == {response["order_id"]}
+
+    def test_place_autoslice_single_leg_when_under_freeze(self) -> None:
+        c = FakeKiteClient()
+        c.set_freeze_limit(1800)
+        response = c.place_autoslice_order(
+            "regular",
+            tradingsymbol="NIFTY26MAYFUT",
+            exchange="NFO",
+            transaction_type="BUY",
+            quantity=900,
+            product="NRML",
+            order_type="MARKET",
+        )
+        assert len(response["children"]) == 1
+
     def test_cancel_order_flips_status(self) -> None:
         c = FakeKiteClient()
         order_id = c.place_order(

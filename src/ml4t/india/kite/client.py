@@ -28,6 +28,7 @@ _CATEGORY_FOR: dict[str, str] = {
     "ohlc": "quote",
     "historical_data": "historical",
     "place_order": "orders",
+    "place_autoslice_order": "orders",
     "modify_order": "orders",
     "cancel_order": "orders",
 }
@@ -140,6 +141,38 @@ class KiteClient:
             **kwargs,
         )
 
+    def place_autoslice_order(
+        self,
+        variety: str,
+        *,
+        tradingsymbol: str,
+        exchange: str,
+        transaction_type: str,
+        quantity: int,
+        product: str,
+        order_type: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Place an order that auto-slices over exchange freeze limits.
+
+        Added by kiteconnect 5.2 (2026-04-23). Kite internally splits the
+        order into legs each at-or-below the per-instrument F&O freeze
+        limit and returns a dict ``{"order_id": <parent_id>, "children":
+        [...]}`` where each child is either ``{"order_id": ...}`` or
+        ``{"error": ...}``.
+        """
+        return self._call(
+            "place_autoslice_order",
+            variety,
+            tradingsymbol=tradingsymbol,
+            exchange=exchange,
+            transaction_type=transaction_type,
+            quantity=quantity,
+            product=product,
+            order_type=order_type,
+            **kwargs,
+        )
+
     def cancel_order(self, variety: str, order_id: str, **kwargs: Any) -> str:
         return self._call("cancel_order", variety, order_id, **kwargs)
 
@@ -232,6 +265,31 @@ class AsyncKiteClient:
     ) -> str:
         return await asyncio.to_thread(
             lambda: self._sync.place_order(
+                variety,
+                tradingsymbol=tradingsymbol,
+                exchange=exchange,
+                transaction_type=transaction_type,
+                quantity=quantity,
+                product=product,
+                order_type=order_type,
+                **kwargs,
+            )
+        )
+
+    async def place_autoslice_order(
+        self,
+        variety: str,
+        *,
+        tradingsymbol: str,
+        exchange: str,
+        transaction_type: str,
+        quantity: int,
+        product: str,
+        order_type: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            lambda: self._sync.place_autoslice_order(
                 variety,
                 tradingsymbol=tradingsymbol,
                 exchange=exchange,

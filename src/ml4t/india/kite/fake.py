@@ -101,6 +101,12 @@ class FakeKiteClient:
         # normally.
         self._next_errors: deque[Exception] = deque()
 
+        # Per-instrument freeze limit used by place_autoslice_order
+        # (kiteconnect 5.2). Real exchange freeze limits vary by
+        # instrument (NIFTY 1800, BANKNIFTY 900, stock F&O lower).
+        # Tests override via :meth:`set_freeze_limit`.
+        self._freeze_limit: int = 1800
+
         # Every method invocation is appended here for test assertion.
         self.calls: list[RecordedCall] = []
 
@@ -123,6 +129,10 @@ class FakeKiteClient:
     def set_margins(self, margins: dict[str, Any]) -> None:
         """Seed the margins payload returned by :meth:`margins`."""
         self._margins = dict(margins)
+
+    def set_freeze_limit(self, limit: int) -> None:
+        """Override the per-leg freeze limit used by auto-slice."""
+        self._freeze_limit = int(limit)
 
     def set_next_error(self, exc: Exception) -> None:
         """Queue an exception to raise on the next method call.
@@ -219,6 +229,65 @@ class FakeKiteClient:
             }
         )
         return order_id
+
+    def place_autoslice_order(
+        self,
+        variety: str,
+        *,
+        tradingsymbol: str,
+        exchange: str,
+        transaction_type: str,
+        quantity: int,
+        product: str,
+        order_type: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Simulate Kite's auto-slice placement.
+
+        Splits ``quantity`` into legs of at most :attr:`_freeze_limit`
+        contracts (defaults to 1800 -- a conservative NIFTY-like freeze
+        cap). Each leg appears in the order book as a separate row;
+        returns ``{"order_id": <parent>, "children": [...]}`` mirroring
+        the real kiteconnect 5.2 response.
+        """
+        self._record(
+            "place_autoslice_order",
+            variety,
+            tradingsymbol=tradingsymbol,
+            exchange=exchange,
+            transaction_type=transaction_type,
+            quantity=quantity,
+            product=product,
+            order_type=order_type,
+            **kwargs,
+        )
+        legs: list[int] = []
+        remaining = int(quantity)
+        cap = self._freeze_limit
+        while remaining > 0:
+            legs.append(min(cap, remaining))
+            remaining -= legs[-1]
+        parent_id = f"FAKE-AS-{len(self._orders) + 1:06d}"
+        children: list[dict[str, Any]] = []
+        for leg_qty in legs:
+            order_id = f"FAKE-{len(self._orders) + 1:06d}"
+            self._orders.append(
+                {
+                    "order_id": order_id,
+                    "variety": variety,
+                    "status": "COMPLETE",
+                    "tradingsymbol": tradingsymbol,
+                    "exchange": exchange,
+                    "transaction_type": transaction_type,
+                    "quantity": leg_qty,
+                    "product": product,
+                    "order_type": order_type,
+                    "parent_order_id": parent_id,
+                    **kwargs,
+                }
+            )
+            children.append({"order_id": order_id})
+        return {"order_id": parent_id, "children": children}
 
     def cancel_order(self, variety: str, order_id: str, **kwargs: Any) -> str:
         """Mark a fake order as cancelled; returns the order id."""

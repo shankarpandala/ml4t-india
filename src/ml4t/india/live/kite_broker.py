@@ -333,7 +333,14 @@ class KiteBroker(IndianBrokerBase):
             Kite-specific: ``product`` (``CNC`` / ``MIS`` / ``NRML`` / ``MTF``),
             ``variety`` (``regular`` / ``amo`` / ``co`` / ``iceberg``),
             ``validity`` (``DAY`` / ``IOC`` / ``TTL``), ``tag``,
-            ``disclosed_quantity``, ``validity_ttl``.
+            ``disclosed_quantity``, ``validity_ttl``, ``market_protection``.
+
+            ``auto_slice=True`` routes through Kite's ``place_autoslice_order``
+            endpoint (kiteconnect 5.2, 2026-04-23), which auto-splits F&O
+            quantities exceeding the exchange freeze limit into child legs.
+            The returned :class:`Order` carries the parent order id; child
+            order ids live on the broker's order book accessible via
+            :meth:`get_pending_orders_async` or the postback stream.
         """
         exchange, tradingsymbol = _split_asset(asset)
 
@@ -347,6 +354,7 @@ class KiteBroker(IndianBrokerBase):
         kite_txn = TransactionType.BUY if side == OrderSide.BUY else TransactionType.SELL
         product = kwargs.pop("product", _default_product(exchange))
         variety = kwargs.pop("variety", Variety.REGULAR)
+        auto_slice = bool(kwargs.pop("auto_slice", False))
 
         payload: dict[str, Any] = dict(kwargs)
         if limit_price is not None:
@@ -354,16 +362,29 @@ class KiteBroker(IndianBrokerBase):
         if stop_price is not None:
             payload["trigger_price"] = stop_price
 
-        order_id = await self._client.place_order(
-            str(variety),
-            tradingsymbol=tradingsymbol,
-            exchange=exchange,
-            transaction_type=str(kite_txn),
-            quantity=abs_qty,
-            product=str(product),
-            order_type=str(kite_order_type),
-            **payload,
-        )
+        if auto_slice:
+            response = await self._client.place_autoslice_order(
+                str(variety),
+                tradingsymbol=tradingsymbol,
+                exchange=exchange,
+                transaction_type=str(kite_txn),
+                quantity=abs_qty,
+                product=str(product),
+                order_type=str(kite_order_type),
+                **payload,
+            )
+            order_id = response.get("order_id") if isinstance(response, dict) else response
+        else:
+            order_id = await self._client.place_order(
+                str(variety),
+                tradingsymbol=tradingsymbol,
+                exchange=exchange,
+                transaction_type=str(kite_txn),
+                quantity=abs_qty,
+                product=str(product),
+                order_type=str(kite_order_type),
+                **payload,
+            )
         return Order(
             asset=asset,
             side=side,

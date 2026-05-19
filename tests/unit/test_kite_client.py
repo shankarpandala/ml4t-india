@@ -64,6 +64,26 @@ class TestDispatch:
         assert oid.startswith("FAKE-")
         assert fake.calls[-1].kwargs["tag"] == "unit-test"
 
+    def test_place_autoslice_order_forwards_kwargs(self) -> None:
+        fake = FakeKiteClient()
+        fake.set_freeze_limit(900)
+        client = KiteClient(fake, rate_limiter=_fast_limiter())
+        response = client.place_autoslice_order(
+            "regular",
+            tradingsymbol="BANKNIFTY26MAYFUT",
+            exchange="NFO",
+            transaction_type="BUY",
+            quantity=2700,
+            product="NRML",
+            order_type="MARKET",
+            tag="auto-slice-test",
+        )
+        assert isinstance(response, dict)
+        assert response["order_id"].startswith("FAKE-AS-")
+        assert len(response["children"]) == 3
+        assert fake.calls[-1].method == "place_autoslice_order"
+        assert fake.calls[-1].kwargs["tag"] == "auto-slice-test"
+
     def test_cancel_order_forwards_positional(self) -> None:
         fake = FakeKiteClient()
         client = KiteClient(fake, rate_limiter=_fast_limiter())
@@ -90,6 +110,7 @@ class TestCategoryMapping:
             ("ohlc", "quote"),
             ("historical_data", "historical"),
             ("place_order", "orders"),
+            ("place_autoslice_order", "orders"),
             ("modify_order", "orders"),
             ("cancel_order", "orders"),
         ],
@@ -217,6 +238,25 @@ class TestAsyncKiteClient:
         )
         assert oid.startswith("FAKE-")
         assert fake.calls[-1].kwargs["price"] == 4000.0
+
+    @pytest.mark.asyncio
+    async def test_place_autoslice_order_returns_parent_and_children(self) -> None:
+        fake = FakeKiteClient()
+        fake.set_freeze_limit(1800)
+        aclient = AsyncKiteClient(
+            KiteClient(fake, rate_limiter=_fast_limiter())
+        )
+        response = await aclient.place_autoslice_order(
+            "regular",
+            tradingsymbol="NIFTY26MAYFUT",
+            exchange="NFO",
+            transaction_type="BUY",
+            quantity=3600,
+            product="NRML",
+            order_type="MARKET",
+        )
+        assert response["order_id"].startswith("FAKE-AS-")
+        assert len(response["children"]) == 2
 
     @pytest.mark.asyncio
     async def test_concurrent_calls_all_land(self) -> None:
