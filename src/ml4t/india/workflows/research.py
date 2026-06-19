@@ -152,8 +152,8 @@ class ResearchPipeline:
         from ml4t.backtest import Engine  # local import, see class docstring
 
         config = nse_india_config(**self._config_overrides)
-        engine = Engine(config=config)
-        backtest_result = engine.run(strategy=strategy, data=features)
+        engine = Engine(feed=features, strategy=strategy, config=config)
+        backtest_result = engine.run()
 
         return ResearchPipelineResult(
             data=data,
