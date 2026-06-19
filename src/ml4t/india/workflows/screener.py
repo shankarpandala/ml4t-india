@@ -375,8 +375,10 @@ def run_cell(
         commission_rate=0.0,
         # Static slippage is intentionally tiny: a small fixed floor applied
         # in addition to the size-scaled LinearImpact(coefficient=0.05) model
-        # below. The explicit slippage_type is required -- upstream defaults
-        # to SlippageType.NONE, which would silently ignore slippage_rate.
+        # below. Set slippage_type explicitly. In b21 Broker.from_config
+        # infers PERCENTAGE from a positive slippage_rate, but we state it
+        # explicitly so behavior is unambiguous and robust if that inference
+        # shim is ever removed.
         slippage_type=SlippageType.PERCENTAGE,
         slippage_rate=0.00005,
         allow_short_selling=True,
