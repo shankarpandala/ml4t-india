@@ -109,6 +109,9 @@ python scripts/store_kite_credentials.py --clear
 
 - [Quickstart](docs/quickstart.md) — login, historical data, backtesting,
   option chain, live trading, NSE calendar
+- [End-to-end workflow](docs/end-to-end.md) — `examples/end_to_end.py` runs
+  the whole feature set on **real Kite data**, with **paper-simulated order
+  execution** (no live orders ever sent)
 - [Integration Testing](docs/integration-testing.md) — real broker smoke
   tests with OS keychain credential storage (no secrets in git)
 - [Releasing](docs/releasing.md) — tag-triggered PyPI publish via OIDC +
