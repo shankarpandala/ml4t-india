@@ -85,6 +85,28 @@ subsequent run that day calls `load_token()` and checks
 happens**. `automated_login()` runs only when the cache is absent or the
 token has rotated (Kite rotates daily at ~06:00 IST).
 
+### Stage 8 agent LLM: offline mock (default) or key-free subscription
+
+By default the Stage 8 agent review uses a keyless, deterministic
+`MockLLMClient` (empty proposals) — no API key, no subscription, no network.
+That keeps the normal run reproducible and dependency-light.
+
+To run the agent against a **real** LLM **without any `ANTHROPIC_API_KEY`**,
+opt in with the `ML4T_INDIA_AGENT_LLM` env flag. The `subscription` value
+drives the local `claude` CLI over your Claude **subscription** OAuth login
+(the CLI's native `--json-schema` constrains the model to the proposals
+shape; `ANTHROPIC_API_KEY` is stripped from the subprocess env so the
+subscription path is guaranteed):
+
+```bash
+ML4T_INDIA_AGENT_LLM=subscription python examples/end_to_end.py
+```
+
+**Prerequisite:** the `claude` CLI must be installed and logged in to your
+subscription — run `claude`, then `/login`. If it is not logged in, Stage 8
+fails loudly with that hint. Leaving the flag unset (or `=mock`) keeps the
+offline mock default.
+
 ## What each stage exercises
 
 | Stage | Feature(s) exercised |
