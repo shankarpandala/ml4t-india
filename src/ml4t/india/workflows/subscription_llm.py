@@ -132,8 +132,16 @@ class SubscriptionLLMClient:
             json.dumps(json_schema),
             "--model",
             self.model,
+            # Non-interactive: the `-p` subprocess must never block on a
+            # permission prompt. bypassPermissions keeps it from hanging...
             "--permission-mode",
             "bypassPermissions",
+            # ...and this denylist is the safety net: a schema-constrained
+            # completion needs NO tools, so we hard-deny every mutating /
+            # exec / network tool. --disallowedTools is enforced regardless
+            # of permission mode, so bypass can never run these.
+            "--disallowedTools",
+            "Bash,Write,Edit,NotebookEdit,WebFetch,WebSearch",
         ]
         if system_text:
             cmd += ["--append-system-prompt", system_text]

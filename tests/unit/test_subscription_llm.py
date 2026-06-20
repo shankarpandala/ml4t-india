@@ -147,6 +147,9 @@ def test_strips_api_key_and_splits_messages(monkeypatch: pytest.MonkeyPatch) -> 
     assert cmd[cmd.index("--model") + 1] == "claude-opus-4-8"
     assert cmd[cmd.index("--permission-mode") + 1] == "bypassPermissions"
     assert cmd[cmd.index("--json-schema") + 1] == json.dumps(PROPOSALS_SCHEMA)
+    # Hard tool denylist: bypass mode can never run exec/write/network tools.
+    denied = cmd[cmd.index("--disallowedTools") + 1].split(",")
+    assert {"Bash", "Write", "Edit", "WebFetch"} <= set(denied)
 
 
 def test_no_system_message_omits_flag(monkeypatch: pytest.MonkeyPatch) -> None:
