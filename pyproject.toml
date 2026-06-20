@@ -150,6 +150,7 @@ dev = [
     "ruff>=0.8",
     "ty",
     "pre-commit>=3",
+    "nbstripout>=0.7",
     "keyring>=25",
 ]
 
