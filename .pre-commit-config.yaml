@@ -24,6 +24,15 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  # nbstripout: strip Jupyter notebook outputs (and execution counts) on
+  # commit. Executed cells can capture PII into stdout -- e.g. a Kite
+  # 'Logged in as: <user_id>' line or a profile name/email -- so outputs
+  # must never reach git. This keeps every committed .ipynb output-free.
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.8.1
+    hooks:
+      - id: nbstripout
+
   # Whitespace hygiene: tiny, fast, no configuration needed.
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
