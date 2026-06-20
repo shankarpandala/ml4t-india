@@ -215,3 +215,20 @@ src/ml4t/india/_version.py
 #   These rules ensure a token cache can never be committed even then.
 .ml4t/
 token.json
+
+# Personal research quarantine.
+#   These paths hold the maintainer's private strategies, research scripts,
+#   futures helpers, and walkthrough notebooks. They depend on uncommitted
+#   modules (ml4t.india.strategies, ml4t.india.core.futures) and must never
+#   ship in the repo or the built wheel -- a fresh clone must import cleanly
+#   without them. Keep on disk locally; never track. See PR demoting the
+#   intraday screener for context.
+personal/
+strategies/
+core/futures.py
+src/ml4t/india/strategies/
+src/ml4t/india/core/futures.py
+scripts/screen_intraday.py
+src/ml4t/india/workflows/screener.py
+notebooks/0[2-9]*.ipynb
+notebooks/1*.ipynb
