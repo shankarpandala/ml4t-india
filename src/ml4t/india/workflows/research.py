@@ -28,6 +28,10 @@ from ml4t.india.backtest import nse_india_config
 from ml4t.india.data.base import IndianOHLCVProvider
 
 FeatureTransform = Callable[[pl.DataFrame], pl.DataFrame]
+# Converts the long-format feature frame into whatever input the supplied
+# model expects (e.g. a ``ml4t.models.PersistentPanelBatch`` for the
+# latent-factor presets). ``None`` passes the frame through unchanged.
+ModelInputBuilder = Callable[[pl.DataFrame], Any]
 
 
 @dataclass
@@ -95,6 +99,7 @@ class ResearchPipeline:
         frequency: str,
         strategy: Any,
         model: Any | None = None,
+        model_input_builder: ModelInputBuilder | None = None,
     ) -> ResearchPipelineResult:
         """Execute data -> features -> [model] -> backtest.
 
@@ -113,6 +118,15 @@ class ResearchPipeline:
             that ride the engine alongside the strategy. Use the presets
             in :mod:`ml4t.india.models.registry` to skip the assembly.
             ``None`` (default) keeps the legacy data-only flow.
+        model_input_builder:
+            Optional callable that converts the feature-stage frame into
+            the input the model expects. The latent-factor presets
+            (PCA / RP-PCA / IPCA) require a
+            :class:`ml4t.models.PersistentPanelBatch`, not a long polars
+            frame -- pass
+            :func:`ml4t.india.models.panel.build_persistent_panel` here.
+            ``None`` (default) feeds the frame to the model unchanged
+            (correct for models that accept the raw frame).
 
         Returns
         -------
@@ -133,20 +147,24 @@ class ResearchPipeline:
         # Stage 3: model (optional).
         model_outputs: Any = None
         if model is not None:
+            # Build the model's expected input first. Latent-factor
+            # pipelines need a PersistentPanelBatch, not the long frame;
+            # the caller supplies that conversion via model_input_builder.
+            model_input = (
+                model_input_builder(features) if model_input_builder is not None else features
+            )
             # Both raw models and pipelines expose a `.fit_predict` or
             # equivalent. We try the pipeline interface first (`run`),
-            # then fall back to fit + transform. Failing both, the
+            # then fall back to fit + predict. Failing both, the
             # caller-supplied object isn't a recognised model surface
             # and we let the AttributeError bubble up.
             if hasattr(model, "run"):
-                model_outputs = model.run(features)
+                model_outputs = model.run(model_input)
             elif hasattr(model, "fit_predict"):
-                model_outputs = model.fit_predict(features)
+                model_outputs = model.fit_predict(model_input)
             else:
-                model.fit(features)
-                model_outputs = (
-                    model.predict(features) if hasattr(model, "predict") else None
-                )
+                model.fit(model_input)
+                model_outputs = model.predict(model_input) if hasattr(model, "predict") else None
 
         # Stage 4: backtest.
         from ml4t.backtest import DataFeed, Engine  # local import, see class docstring
@@ -169,4 +187,9 @@ class ResearchPipeline:
         )
 
 
-__all__ = ["FeatureTransform", "ResearchPipeline", "ResearchPipelineResult"]
+__all__ = [
+    "FeatureTransform",
+    "ModelInputBuilder",
+    "ResearchPipeline",
+    "ResearchPipelineResult",
+]
