@@ -2,7 +2,8 @@
 
 Every test mocks ``subprocess.run``: NO real ``claude`` call, NO API key,
 NO subscription quota is consumed. We assert the CLI-envelope -> LLMResponse
-mapping, that ``ANTHROPIC_API_KEY`` is stripped from the subprocess env, the
+mapping, that both ``ANTHROPIC_API_KEY`` and ``ANTHROPIC_AUTH_TOKEN`` are
+stripped from the subprocess env, the
 system/user message split, and the malformed-output re-prompt-then-raise
 path mandated by the upstream ``LLMClient`` Protocol.
 
@@ -124,6 +125,9 @@ def test_result_as_string_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_strips_api_key_and_splits_messages(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "secret-should-be-stripped")
+    # Claude Code honors ANTHROPIC_AUTH_TOKEN as an alternate bearer
+    # credential, so it must be stripped too.
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "token-should-be-stripped")
     runner = _Runner(_completed(_envelope({"proposals": []})))
     monkeypatch.setattr(subprocess, "run", runner)
 
@@ -137,8 +141,9 @@ def test_strips_api_key_and_splits_messages(monkeypatch: pytest.MonkeyPatch) -> 
     )
 
     cmd, kwargs = runner.calls[0]
-    # ANTHROPIC_API_KEY stripped from the subprocess environment.
+    # BOTH credential env vars stripped from the subprocess environment.
     assert "ANTHROPIC_API_KEY" not in kwargs["env"]
+    assert "ANTHROPIC_AUTH_TOKEN" not in kwargs["env"]
     # System messages joined into --append-system-prompt.
     assert cmd[cmd.index("--append-system-prompt") + 1] == "SYS-A\n\nSYS-B"
     # User content arrives on stdin.

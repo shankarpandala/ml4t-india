@@ -5,9 +5,11 @@ Protocol -- a single :meth:`complete_with_schema` -- WITHOUT an
 ``ANTHROPIC_API_KEY``. Instead of a vendor SDK it shells out to the local
 ``claude`` CLI, which authenticates through the user's **subscription**
 OAuth login (``claude`` then ``/login``). The CLI's native
-``--json-schema`` flag constrains the model to the requested JSON shape,
-and the schema-validated object comes back in the envelope's
-``structured_output`` field.
+``--json-schema`` flag constrains the model to the requested JSON shape
+-- but only the *shape*, not the *values*: the CLI runs at its own
+default sampling temperature and exposes no temperature/max-tokens flag,
+so the call is **not deterministic**. The schema-validated object comes
+back in the envelope's ``structured_output`` field.
 
 Why a subprocess and not the SDK: the ``claude_agent_sdk`` Python package
 is not installed in this environment, and the CLI is the only
@@ -74,11 +76,16 @@ class SubscriptionLLMClient:
     ) -> LLMResponse:
         """Return an :class:`LLMResponse` whose ``data`` validates the schema.
 
-        ``max_tokens``/``temperature`` are accepted for Protocol parity but
-        not forwarded -- the ``claude`` CLI does not expose them. The
-        ``--json-schema`` constraint plus the subscription default make the
-        single call effectively deterministic; we still validate and, per
-        the Protocol, **re-prompt once** before raising on malformed output.
+        ``max_tokens``/``temperature`` are accepted only for ``LLMClient``
+        Protocol parity and are NOT forwarded -- the ``claude`` CLI exposes
+        no temperature or max-tokens flag. This call is therefore **not
+        deterministic**: the CLI runs at its own default sampling
+        temperature, so ``--json-schema`` constrains the output *shape* but
+        not its *values*, and the ``temperature=0`` replay determinism that
+        the Protocol allows is **not honored** here. The CLI also applies its
+        own (larger) output-token cap rather than the nominal ``max_tokens``.
+        We validate and, per the Protocol, **re-prompt once** before raising
+        on malformed output.
         """
         system_text, user_text = self._split_messages(messages)
 
@@ -146,9 +153,13 @@ class SubscriptionLLMClient:
         if system_text:
             cmd += ["--append-system-prompt", system_text]
 
-        # Strip ANTHROPIC_API_KEY so the subscription OAuth path is guaranteed
-        # and we can never silently fall back to a metered API key.
-        env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+        # Strip BOTH credential env vars so the subscription OAuth path is
+        # guaranteed and we can never silently fall back to a metered API key.
+        # Claude Code honors ANTHROPIC_AUTH_TOKEN as an alternate bearer
+        # credential, so it must go too; ANTHROPIC_BASE_URL (routing) is left
+        # untouched on purpose -- we only strip credentials.
+        _STRIP = {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
+        env = {k: v for k, v in os.environ.items() if k not in _STRIP}
 
         try:
             completed = subprocess.run(
