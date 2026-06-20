@@ -8,9 +8,12 @@ test vector, NOT a real seed.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 pyotp = pytest.importorskip("pyotp")
+requests = pytest.importorskip("requests")
 
 from ml4t.india.core.exceptions import (  # noqa: E402
     IndiaError,
@@ -55,9 +58,12 @@ class FakeSession:
 
     def _next(self, key):
         resp = self._responses[key]
-        if isinstance(resp, list):
-            return resp.pop(0)
-        return resp
+        item = resp.pop(0) if isinstance(resp, list) else resp
+        # A queued exception is raised (models e.g. a redirect to an
+        # unreachable redirect_url host raising requests.ConnectionError).
+        if isinstance(item, BaseException):
+            raise item
+        return item
 
     def post(self, url, data=None, **kwargs):
         key = "login" if url.endswith("/api/login") else "twofa"
@@ -83,6 +89,26 @@ def _ok_connect():
         f"?action=login&status=success&request_token={FAKE_REQUEST_TOKEN}"
     )
     return FakeResponse(status_code=302, headers={"Location": location})
+
+
+def _tokenless_302():
+    # A 302 whose Location has no request_token, forcing the code to follow
+    # the redirect (which is where the ConnectionError recovery lives).
+    return FakeResponse(
+        status_code=302,
+        headers={"Location": "https://myapp.example/finish?status=success"},
+    )
+
+
+def _connection_error(url):
+    """A ``requests.ConnectionError`` carrying an attempted-request URL.
+
+    Models the redirect being followed to an unreachable, app-configured
+    redirect_url host. ``url=None`` models ``exc.request`` being absent.
+    """
+    exc = requests.ConnectionError("Max retries exceeded")
+    exc.request = SimpleNamespace(url=url) if url is not None else None
+    return exc
 
 
 @pytest.fixture
@@ -268,6 +294,64 @@ def test_missing_request_token_raises_india_error(patched_generate_session):
             FAKE_TOTP_SECRET,
             session=session,
         )
+
+
+def test_request_token_recovered_from_connection_error(patched_generate_session):
+    """If following the redirect to an unreachable redirect_url host raises
+    ConnectionError, the token is recovered from the attempted URL."""
+    recovered_url = (
+        "https://myapp.example/redirect"
+        "?request_token=recovered_fake_token&action=login&status=success"
+    )
+    # First GET (connect/login) yields a tokenless 302; following its
+    # Location raises ConnectionError carrying the real redirect URL.
+    session = FakeSession(
+        login=_ok_login(),
+        twofa=_ok_twofa(),
+        connect=[_tokenless_302(), _connection_error(recovered_url)],
+    )
+
+    record = automated_login(
+        FAKE_API_KEY,
+        FAKE_API_SECRET,
+        FAKE_USER_ID,
+        FAKE_PASSWORD,
+        FAKE_TOTP_SECRET,
+        session=session,
+    )
+
+    assert isinstance(record, TokenRecord)
+    assert patched_generate_session["request_token"] == "recovered_fake_token"
+
+
+@pytest.mark.parametrize(
+    "attempted_url",
+    [
+        "https://myapp.example/redirect?action=login&status=success",  # no token
+        None,  # exc.request is None
+    ],
+)
+def test_connection_error_without_token_raises_india_error(attempted_url, patched_generate_session):
+    """A ConnectionError with no recoverable request_token must surface a
+    clear IndiaError (never an unhandled exception, never a secret)."""
+    session = FakeSession(
+        login=_ok_login(),
+        twofa=_ok_twofa(),
+        connect=[_tokenless_302(), _connection_error(attempted_url)],
+    )
+
+    with pytest.raises(IndiaError) as excinfo:
+        automated_login(
+            FAKE_API_KEY,
+            FAKE_API_SECRET,
+            FAKE_USER_ID,
+            FAKE_PASSWORD,
+            FAKE_TOTP_SECRET,
+            session=session,
+        )
+    rendered = str(excinfo.value)
+    assert FAKE_PASSWORD not in rendered
+    assert FAKE_TOTP_SECRET not in rendered
 
 
 def test_no_secret_appears_in_error_messages(patched_generate_session):
