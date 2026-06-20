@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 from ml4t.backtest import BacktestConfig, CommissionType
+from ml4t.backtest.config import SlippageType
 
 
 def nse_india_config(**overrides: Any) -> BacktestConfig:
@@ -36,6 +37,7 @@ def nse_india_config(**overrides: Any) -> BacktestConfig:
     defaults: dict[str, Any] = {
         "commission_type": CommissionType.PERCENTAGE,
         "commission_rate": 0.0012,
+        "slippage_type": SlippageType.PERCENTAGE,
         "slippage_rate": 0.0005,
         "stop_slippage_rate": 0.001,
     }
