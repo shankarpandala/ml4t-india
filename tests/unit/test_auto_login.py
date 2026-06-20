@@ -66,7 +66,13 @@ class FakeSession:
 
     def get(self, url, **kwargs):
         self.calls.append((url, "GET", kwargs))
-        return self._next("connect")
+        resp = self._next("connect")
+        # A queued exception models a transport failure on this GET (e.g. the
+        # app redirect_url host is unreachable), which raises rather than
+        # returns -- exactly what the recovery branch must handle.
+        if isinstance(resp, BaseException):
+            raise resp
+        return resp
 
 
 def _ok_login():
@@ -268,6 +274,94 @@ def test_missing_request_token_raises_india_error(patched_generate_session):
             FAKE_TOTP_SECRET,
             session=session,
         )
+
+
+class FakeRequest:
+    """Minimal stand-in for ``requests.PreparedRequest`` (carries ``.url``)."""
+
+    def __init__(self, url):
+        self.url = url
+
+
+def _token_less_302():
+    """A 302 whose Location carries no request_token. Forces
+    ``_harvest_request_token`` past the early return into the "follow once"
+    GET, which is where the transport failure is injected."""
+    return FakeResponse(
+        status_code=302,
+        headers={"Location": "https://finish.example/finish?sess=abc&status=success"},
+    )
+
+
+def test_connection_error_recovers_token_from_attempted_url(patched_generate_session):
+    """The 302-follow GET to an unreachable redirect_url host raises
+    ``ConnectionError``; the token is recovered from ``exc.request.url``."""
+    import requests  # noqa: PLC0415
+
+    attempted_url = (
+        "https://myapp.example/redirect"
+        f"?request_token={FAKE_REQUEST_TOKEN}&action=login&status=success"
+    )
+    conn_err = requests.ConnectionError(request=FakeRequest(attempted_url))
+    session = FakeSession(
+        login=_ok_login(),
+        twofa=_ok_twofa(),
+        connect=[_token_less_302(), conn_err],
+    )
+
+    record = automated_login(
+        FAKE_API_KEY,
+        FAKE_API_SECRET,
+        FAKE_USER_ID,
+        FAKE_PASSWORD,
+        FAKE_TOTP_SECRET,
+        session=session,
+    )
+
+    assert isinstance(record, TokenRecord)
+    # Token salvaged from the URL the failed GET was attempting, then handed
+    # to the SDK boundary verbatim.
+    assert patched_generate_session["request_token"] == FAKE_REQUEST_TOKEN
+
+
+@pytest.mark.parametrize(
+    "request_obj",
+    [
+        # Connection failed and the attempted URL carried no request_token.
+        FakeRequest("https://finish.example/dead?action=login&status=success"),
+        # ``exc.request`` is absent entirely (None).
+        None,
+    ],
+    ids=["url-without-token", "request-is-none"],
+)
+def test_connection_error_without_token_raises_india_error(
+    patched_generate_session, request_obj
+):
+    """A transport failure with no recoverable token surfaces a clear
+    ``IndiaError`` -- no unhandled exception and no secret in the message."""
+    import requests  # noqa: PLC0415
+
+    conn_err = requests.ConnectionError(request=request_obj)
+    session = FakeSession(
+        login=_ok_login(),
+        twofa=_ok_twofa(),
+        connect=[_token_less_302(), conn_err],
+    )
+
+    with pytest.raises(IndiaError) as excinfo:
+        automated_login(
+            FAKE_API_KEY,
+            FAKE_API_SECRET,
+            FAKE_USER_ID,
+            FAKE_PASSWORD,
+            FAKE_TOTP_SECRET,
+            session=session,
+        )
+
+    rendered = str(excinfo.value)
+    assert FAKE_PASSWORD not in rendered
+    assert FAKE_TOTP_SECRET not in rendered
+    assert FAKE_REQUEST_TOKEN not in rendered
 
 
 def test_no_secret_appears_in_error_messages(patched_generate_session):
