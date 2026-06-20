@@ -94,7 +94,7 @@ def resolve_preset(name: str) -> IndiaModelPreset:
 def _nse_cash_long_only_pipeline() -> Any:
     from ml4t.india.models.pipelines import nse_latent_factor_pipeline
 
-    return nse_latent_factor_pipeline(n_factors=5, forecaster_window=20)
+    return nse_latent_factor_pipeline(n_factors=5)
 
 
 def _nse_cash_long_only_feed_inputs() -> Any:
@@ -111,7 +111,6 @@ def _nse_fno_delta_neutral_pipeline() -> Any:
 
     return nse_latent_factor_pipeline(
         model=nse_rppca_model(n_factors=7, risk_premium_weight=15.0),
-        forecaster_window=10,
     )
 
 
@@ -127,7 +126,6 @@ def _nse_sector_rotation_pipeline() -> Any:
 
     return nse_latent_factor_pipeline(
         model=nse_ipca_model(n_factors=4),
-        forecaster_window=60,
     )
 
 

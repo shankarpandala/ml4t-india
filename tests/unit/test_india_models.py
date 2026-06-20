@@ -43,15 +43,29 @@ def _install_fake_ml4t_models(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespac
     rppca = _Recorder("RPPCAModel")
     ipca = _Recorder("IPCAModel")
     forecaster = _Recorder("ExpandingMeanFactorForecaster")
+    mapper = _Recorder("BetaLambdaMapper")
     pipeline = _Recorder("LatentFactorForecastPipeline")
     portfolio = _Recorder("PortfolioAllocationPipeline")
     feed_inputs = _Recorder("BacktestDataFeedInputs")
 
+    # Upstream constructs each model from a typed config dataclass. The
+    # india wrappers pass ``XConfig(...)`` into ``XModel(config)``, so the
+    # stub models record the *config* object as their single positional
+    # arg. We mirror the real config classes with lightweight stand-ins
+    # that capture the kwargs they were built with.
+    class _Config:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
     fake = SimpleNamespace(
         PCAModel=pca,
+        PCAConfig=_Config,
         RPPCAModel=rppca,
+        RPPCAConfig=_Config,
         IPCAModel=ipca,
+        IPCAConfig=_Config,
         ExpandingMeanFactorForecaster=forecaster,
+        BetaLambdaMapper=mapper,
         LatentFactorForecastPipeline=pipeline,
         PortfolioAllocationPipeline=portfolio,
     )
@@ -62,10 +76,12 @@ def _install_fake_ml4t_models(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespac
     return SimpleNamespace(
         models=fake,
         integration=fake_integration,
+        config_cls=_Config,
         pca=pca,
         rppca=rppca,
         ipca=ipca,
         forecaster=forecaster,
+        mapper=mapper,
         pipeline=pipeline,
         portfolio=portfolio,
         feed_inputs=feed_inputs,
@@ -76,44 +92,52 @@ def _install_fake_ml4t_models(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespac
 
 
 class TestNseFactorPresets:
+    @staticmethod
+    def _config_kwargs(recorder: Any) -> dict[str, Any]:
+        """Return the kwargs of the config the stub model was built with.
+
+        The india wrappers call ``XModel(XConfig(**kwargs))``, so the
+        recorded model is constructed with a single positional config
+        argument exposing those kwargs.
+        """
+        args, _ = recorder.calls[0]
+        return args[0].kwargs
+
     def test_pca_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
         stub = _install_fake_ml4t_models(monkeypatch)
         from ml4t.india.models.factors import nse_pca_model
 
         nse_pca_model()
         assert stub.pca.calls
-        kwargs = stub.pca.calls[0][1]
+        kwargs = self._config_kwargs(stub.pca)
         assert kwargs["n_factors"] == 5
-        assert kwargs["standardize"] is True
-        assert kwargs["demean"] is True
 
     def test_pca_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         stub = _install_fake_ml4t_models(monkeypatch)
         from ml4t.india.models.factors import nse_pca_model
 
-        nse_pca_model(n_factors=3, standardize=False, max_iter=200)
-        kwargs = stub.pca.calls[0][1]
+        nse_pca_model(n_factors=3, seed=7)
+        kwargs = self._config_kwargs(stub.pca)
         assert kwargs["n_factors"] == 3
-        assert kwargs["standardize"] is False
-        assert kwargs["max_iter"] == 200
+        assert kwargs["seed"] == 7
 
     def test_rppca_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
         stub = _install_fake_ml4t_models(monkeypatch)
         from ml4t.india.models.factors import nse_rppca_model
 
         nse_rppca_model()
-        kwargs = stub.rppca.calls[0][1]
+        kwargs = self._config_kwargs(stub.rppca)
         assert kwargs["n_factors"] == 5
-        assert kwargs["risk_premium_weight"] == 10.0
+        # risk_premium_weight maps to the upstream RPPCAConfig.gamma field.
+        assert kwargs["gamma"] == 10.0
 
-    def test_ipca_with_n_chars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_ipca_factor_count(self, monkeypatch: pytest.MonkeyPatch) -> None:
         stub = _install_fake_ml4t_models(monkeypatch)
         from ml4t.india.models.factors import nse_ipca_model
 
-        nse_ipca_model(n_chars=5)
-        kwargs = stub.ipca.calls[0][1]
-        assert kwargs["n_factors"] == 5
-        assert kwargs["n_chars"] == 5
+        nse_ipca_model(n_factors=4)
+        kwargs = self._config_kwargs(stub.ipca)
+        assert kwargs["n_factors"] == 4
 
 
 # ---- pipelines ---------------------------------------------------------
@@ -129,11 +153,15 @@ class TestNsePipelinePresets:
         nse_latent_factor_pipeline()
         # pca should be called for the default model.
         assert stub.pca.calls
-        # forecaster should be called for the default forecaster.
+        # forecaster should be called for the default forecaster (the
+        # upstream expanding-mean estimator no longer takes a window).
         assert stub.forecaster.calls
-        assert stub.forecaster.calls[0][1]["window"] == 20
-        # pipeline assembled with both.
+        # mapper should be called for the default asset mapper.
+        assert stub.mapper.calls
+        # pipeline assembled with model, forecaster and mapper.
         assert stub.pipeline.calls
+        pipeline_kwargs = stub.pipeline.calls[0][1]
+        assert {"model", "forecaster", "mapper"} <= pipeline_kwargs.keys()
 
     def test_portfolio_pipeline_requires_model(
         self, monkeypatch: pytest.MonkeyPatch
