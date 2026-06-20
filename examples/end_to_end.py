@@ -50,6 +50,7 @@ import dataclasses
 import datetime as dt
 import enum
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -663,6 +664,27 @@ def _deploy_gate(returns: list[float]) -> bool:
     return ready
 
 
+def _select_agent_llm() -> Any | None:
+    """Pick the agent LLM from ``ML4T_INDIA_AGENT_LLM`` (default: offline mock).
+
+    * unset / ``mock`` -> ``None``: the keyless deterministic MockLLMClient
+      default inside :class:`IndiaResearchAgent` (no key, no subscription,
+      no network -- the safe default for a normal run).
+    * ``subscription`` -> a :class:`SubscriptionLLMClient` that drives the
+      local ``claude`` CLI over the user's subscription (no API key).
+    """
+    mode = os.environ.get("ML4T_INDIA_AGENT_LLM", "mock").strip().lower()
+    if mode in ("", "mock"):
+        return None
+    if mode == "subscription":
+        from ml4t.india.workflows.subscription_llm import SubscriptionLLMClient
+
+        _ok("agent LLM: subscription-backed claude CLI (no ANTHROPIC_API_KEY)")
+        return SubscriptionLLMClient()
+    _warn(f"unknown ML4T_INDIA_AGENT_LLM={mode!r}; falling back to offline mock")
+    return None
+
+
 def _run_agent(gross_sharpe: float, net_sharpe: float) -> bool:
     from ml4t.india.workflows.agent import IndiaResearchAgent
 
@@ -673,13 +695,23 @@ def _run_agent(gross_sharpe: float, net_sharpe: float) -> bool:
             _warn("install with: pip install 'ml4t-india[agent]'")
             return False
         try:
-            agent = IndiaResearchAgent(universe=UNIVERSE_PRESET, line_id="india-e2e")
+            llm = _select_agent_llm()
+            agent = IndiaResearchAgent(
+                llm=llm, universe=UNIVERSE_PRESET, line_id="india-e2e"
+            )
             note = agent.run(run_dir)
         except Exception as exc:  # noqa: BLE001
             _warn(f"agent review errored: {exc}")
             return False
+        # Log the REAL agent decision; gate semantics are unchanged (a note
+        # was produced => review passed). Do not silently claim READY.
         verdict = getattr(note, "verdict", None) or getattr(note, "decision", "reviewed")
-        _ok(f"agent produced a research note (verdict: {verdict})")
+        verdict = getattr(verdict, "value", verdict)
+        n_proposals = len(getattr(note, "proposals", ()) or ())
+        _ok(
+            f"agent produced a research note (decision: {verdict}; "
+            f"{n_proposals} proposal(s))"
+        )
         return True
 
 

@@ -177,8 +177,11 @@ docs = [
 ]
 
 # LLM research-loop agent (ml4t-agent) -- alpha; opt-in.
+# jsonschema backs SubscriptionLLMClient's output validation / re-prompt loop
+# (the key-free claude-CLI adapter); ml4t-agent does not pull it transitively.
 agent = [
     "ml4t-agent[executor]",
+    "jsonschema>=4",
 ]
 agent-anthropic = [
     "ml4t-agent[executor,llm-anthropic]",

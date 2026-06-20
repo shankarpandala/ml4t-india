@@ -12,6 +12,9 @@ Orchestrators that compose the rest of ml4t-india + upstream:
   wired with Indian-market defaults. ml4t-agent is an opt-in alpha
   dependency (the ``agent`` extra), so the class lazily imports it inside
   method bodies; importing this package never requires ml4t-agent.
+* :class:`SubscriptionLLMClient` -- a key-free ``LLMClient`` that drives
+  the local ``claude`` CLI over the user's subscription (no
+  ``ANTHROPIC_API_KEY``). Opt-in; pass it as ``IndiaResearchAgent(llm=...)``.
 
 The orchestrators are thin by design: they do NOT introduce new domain
 logic, only compose existing pieces with Indian-market defaults
@@ -23,9 +26,15 @@ from __future__ import annotations
 from ml4t.india.workflows.agent import IndiaResearchAgent
 from ml4t.india.workflows.deployment import DeploymentPipeline
 from ml4t.india.workflows.research import ResearchPipeline
+from ml4t.india.workflows.subscription_llm import (
+    SubscriptionLLMClient,
+    SubscriptionLLMError,
+)
 
 __all__ = [
     "DeploymentPipeline",
     "IndiaResearchAgent",
     "ResearchPipeline",
+    "SubscriptionLLMClient",
+    "SubscriptionLLMError",
 ]
