@@ -281,6 +281,30 @@ def _feature_transform(data: pl.DataFrame) -> pl.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Stage 6 helper: assemble the cross-sectional panel the PCA preset needs.
+# ---------------------------------------------------------------------------
+
+# Characteristic columns to forward to the panel when present. Only those
+# actually produced by the feature stage are used; the PCA preset needs the
+# returns panel (derived from real close prices) and treats characteristics
+# as optional, so a degraded feature stage still yields a valid PCA input.
+_PANEL_FEATURES = [f for f in _FEATURES if f != "returns"]
+
+
+def _build_panel(features: pl.DataFrame) -> Any:
+    """Pivot the long feature frame into a PersistentPanelBatch.
+
+    Latent-factor presets (PCA / RP-PCA / IPCA) require
+    :class:`ml4t.models.PersistentPanelBatch`, not the long
+    ``(timestamp, symbol, OHLCV...)`` frame. Returns are derived per symbol
+    from the real ``close`` series (no synthetic data introduced).
+    """
+    from ml4t.india.models.panel import build_persistent_panel
+
+    return build_persistent_panel(features, feature_cols=_PANEL_FEATURES)
+
+
+# ---------------------------------------------------------------------------
 # A simple real Strategy for the backtest stage.
 # ---------------------------------------------------------------------------
 
@@ -349,6 +373,7 @@ def _write_evidence_pack(run_dir: Path, gross_sharpe: float, net_sharpe: float) 
         from ml4t.agent.schemas import (
             BacktestSummary,
             CostSummary,
+            Determinism,
             EvidencePack,
             LineageSummary,
             MethodologyWarning,
@@ -410,7 +435,13 @@ def _write_evidence_pack(run_dir: Path, gross_sharpe: float, net_sharpe: float) 
             package_versions={"ml4t-india": "e2e"},
         ),
         warnings=(
-            MethodologyWarning(code="W001", message="single label tested", severity=Severity.WARNING),
+            MethodologyWarning(
+                code="W001",
+                message="single label tested",
+                severity=Severity.WARNING,
+                determinism=Determinism.ARITHMETIC,
+                triggering_artifact="validation.signal",
+            ),
         ),
         diagnostics=(),
         triage=None,
@@ -496,6 +527,13 @@ async def _run() -> int:
 
     _stage(6, "Backtest (ResearchPipeline.run on real OHLCV)")
     strategy = _build_strategy()
+    # The nse_cash_long_only preset is a cross-sectional latent-factor (PCA)
+    # pipeline: it consumes a stable-entity PersistentPanelBatch (a dense
+    # (T, N) returns matrix over the multi-symbol panel), not the long
+    # OHLCV frame. ``build_persistent_panel`` pivots the real downloaded
+    # features into that batch (deriving close-to-close returns), so the
+    # model runs on the real multi-symbol panel instead of raising
+    # ``PCA requires PersistentPanelBatch input``.
     try:
         result = pipeline.run(
             symbols=symbols,
@@ -504,6 +542,7 @@ async def _run() -> int:
             frequency="daily",
             strategy=strategy,
             model=model,
+            model_input_builder=_build_panel,
         )
     except Exception as exc:  # noqa: BLE001
         _fail(f"backtest failed: {exc}")
