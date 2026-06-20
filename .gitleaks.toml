@@ -1,0 +1,40 @@
+# gitleaks configuration for ml4t-india.
+#
+# This repo handles live Zerodha Kite credentials, so we run gitleaks both
+# locally (pre-commit) and in CI (.github/workflows/gitleaks.yml) to catch
+# any credential / PII that lands in *source* — something the existing
+# nbstripout hook (strips notebook OUTPUTS) and .gitignore (token.json,
+# .ml4t/) structurally cannot cover: source-cell text and arbitrarily-named
+# token files.
+#
+# We EXTEND the upstream default ruleset rather than replacing it, so every
+# rule gitleaks ships (AWS keys, generic-api-key, private keys, etc.) stays
+# active. The allowlist below suppresses ONLY a handful of known-safe
+# placeholder / test values already in the tree. Every entry is an exact
+# string (not a broad pattern) so no real secret can ever be hidden by it.
+
+title = "ml4t-india gitleaks config"
+
+[extend]
+# Inherit all of gitleaks' built-in rules.
+useDefault = true
+
+[allowlist]
+description = "Known-safe placeholders and test fixtures — never real credentials."
+# `regexes` are matched against each detected secret; a match suppresses
+# the finding. Each pattern here is an exact literal, deliberately narrow.
+regexes = [
+  # Public RFC 4648 / RFC 6238 base32 TOTP test vector. Used as a FAKE TOTP
+  # seed in tests/unit/test_auto_login.py (FAKE_TOTP_SECRET) to exercise the
+  # pyotp code path. It is published in the RFCs and is not a real secret.
+  '''JBSWY3DPEHPK3PXP''',
+
+  # Hardcoded dummy API key in tests/unit/test_cli.py. The test
+  # (`test_cached_record_dump_redacts_secrets`) saves this fake key purely to
+  # assert that `whoami` REDACTS secrets — it is intentionally not real.
+  '''longapikey1234''',
+
+  # Placeholder `api_secret='sekret'` in notebooks/10-deployment-pipeline.ipynb,
+  # a documentation example of wiring a PostbackHandler. Obvious dummy value.
+  '''sekret''',
+]
