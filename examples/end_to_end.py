@@ -51,6 +51,7 @@ import datetime as dt
 import enum
 import json
 import os
+import statistics
 import sys
 import tempfile
 from pathlib import Path
@@ -258,26 +259,60 @@ class _MultiSymbolProvider:
 # Stage 4: feature transform (ml4t.engineer.compute_features).
 # ---------------------------------------------------------------------------
 
-_FEATURES = ["returns", "sma_10", "sma_20", "rsi_14", "volatility_20"]
+# Output column -> (ml4t.engineer registry feature, params).
+#
+# These map to the *real* ``ml4t.engineer`` registry. The intuitive labels
+# ``returns/sma_10/sma_20/rsi_14/volatility_20`` are NOT registry feature
+# names (``compute_features`` would raise ``ValueError: Feature 'returns' not
+# found in registry``); the genuine registry names are ``sma`` (param
+# ``period``), ``rsi`` (param ``period``) and ``realized_volatility`` (param
+# ``period``). Because the engineer aliases every feature to its bare registry
+# name, two ``sma`` calls would both land in one ``sma`` column -- so each
+# feature is computed in isolation and renamed to a distinct output column.
+_RETURNS_COL = "returns"
+_REGISTRY_SPECS: tuple[tuple[str, str, dict[str, Any]], ...] = (
+    ("sma_10", "sma", {"period": 10}),
+    ("sma_20", "sma", {"period": 20}),
+    ("rsi_14", "rsi", {"period": 14}),
+    ("volatility_20", "realized_volatility", {"period": 20}),
+)
+# All output columns the transform produces, returns first.
+_FEATURES = [_RETURNS_COL, *(out for out, _name, _p in _REGISTRY_SPECS)]
 
 
 def _feature_transform(data: pl.DataFrame) -> pl.DataFrame:
     """Per-symbol feature engineering via ml4t-engineer.
 
     Computed per symbol so windowed features don't bleed across the
-    vertical concat of multiple instruments.
+    vertical concat of multiple instruments. ``returns`` is the simple
+    close-to-close return (no registry feature emits a bare ``returns``
+    column, and ``realized_volatility`` consumes one as its input); the rest
+    come straight from ``ml4t.engineer.compute_features`` with the real
+    registry names in :data:`_REGISTRY_SPECS`.
+
+    A missing/renamed registry feature now raises ``ValueError`` out of
+    ``compute_features`` and propagates -- the orchestrator's Stage-6 guard
+    turns that into a loud ``_fail`` instead of silently falling back to raw
+    OHLCV and *claiming* features were computed.
     """
     from ml4t.engineer import compute_features
 
     out: list[pl.DataFrame] = []
     for (_symbol,), group in data.group_by(["symbol"], maintain_order=True):
-        try:
-            enriched = compute_features(group.sort("timestamp"), _FEATURES)
-        except Exception:  # noqa: BLE001 -- a missing catalog feature must not abort the run
-            enriched = group
-        if isinstance(enriched, pl.LazyFrame):
-            enriched = enriched.collect()
-        out.append(enriched)
+        work = group.sort("timestamp").with_columns(
+            pl.col("close").pct_change().alias(_RETURNS_COL)
+        )
+        for out_col, feature_name, params in _REGISTRY_SPECS:
+            enriched = compute_features(work, [{"name": feature_name, "params": params}])
+            if isinstance(enriched, pl.LazyFrame):
+                enriched = enriched.collect()
+            # The engineer appends the feature under its bare registry name;
+            # lift it into the distinct output column and drop the bare name so
+            # the next (same-named) feature can't collide with it.
+            work = work.with_columns(
+                enriched.get_column(feature_name).alias(out_col)
+            ).drop(feature_name, strict=False)
+        out.append(work)
     return pl.concat(out, how="vertical_relaxed") if out else data
 
 
@@ -285,11 +320,14 @@ def _feature_transform(data: pl.DataFrame) -> pl.DataFrame:
 # Stage 6 helper: assemble the cross-sectional panel the PCA preset needs.
 # ---------------------------------------------------------------------------
 
-# Characteristic columns to forward to the panel when present. Only those
-# actually produced by the feature stage are used; the PCA preset needs the
-# returns panel (derived from real close prices) and treats characteristics
-# as optional, so a degraded feature stage still yields a valid PCA input.
-_PANEL_FEATURES = [f for f in _FEATURES if f != "returns"]
+# Characteristic columns to forward to the panel. These are the real
+# registry-backed feature columns (sma_10/sma_20/rsi_14/volatility_20) the
+# feature stage now genuinely produces -- so the PCA panel carries a
+# ``(T, N, F)`` characteristics tensor, not just the returns matrix. The PCA
+# preset still treats characteristics as optional, and ``build_persistent_panel``
+# forwards only columns actually present, so any single absent column degrades
+# gracefully rather than aborting the panel build.
+_PANEL_FEATURES = [out for out, _name, _p in _REGISTRY_SPECS]
 
 
 def _build_panel(features: pl.DataFrame) -> Any:
@@ -328,24 +366,56 @@ def _build_strategy() -> Any:
 # ---------------------------------------------------------------------------
 
 
+def _coerce_equity_value(point: Any) -> float | None:
+    """Pull the numeric portfolio value out of one equity-curve point.
+
+    The real ``ml4t.backtest.BacktestResult`` stores ``equity_curve`` as a list
+    of ``(timestamp, portfolio_value)`` tuples (see ``BacktestResult`` in the
+    installed library, whose own helpers do ``[float(v) for _, v in
+    self.equity_curve]``). Iterating it therefore yields tuples, not floats, so a
+    bare ``float(point)`` raises ``TypeError``. Prefer a named ``equity`` /
+    ``value`` field when present (a polars ``Row`` or namedtuple), then fall back
+    to the numeric element of a ``(ts, value)`` pair; ``None`` if neither fits.
+    """
+    if isinstance(point, bool):  # bool is an int subclass; never a value here
+        return None
+    if isinstance(point, (int, float)):
+        return float(point)
+    for name in ("equity", "portfolio_value", "value"):
+        named = point.get(name) if isinstance(point, dict) else getattr(point, name, None)
+        if isinstance(named, (int, float)) and not isinstance(named, bool):
+            return float(named)
+    if isinstance(point, (tuple, list)) and point:
+        # (timestamp, value) -> take the last numeric element, not blindly [1].
+        for elem in reversed(point):
+            if isinstance(elem, (int, float)) and not isinstance(elem, bool):
+                return float(elem)
+    return None
+
+
 def _extract_returns(backtest_result: Any, features: pl.DataFrame) -> list[float]:
     """Best-effort daily returns from the backtest, else from close prices."""
     for attr in ("returns", "daily_returns"):
         series = getattr(backtest_result, attr, None)
         if series is not None:
-            values = list(series)
+            values = [v for v in map(_coerce_equity_value, series) if v is not None]
             if len(values) > 2:
-                return [float(v) for v in values]
+                return values
     for attr in ("equity_curve", "portfolio_values", "equity"):
         curve = getattr(backtest_result, attr, None)
-        if curve is not None:
-            vals = [float(v) for v in curve]
-            if len(vals) > 2:
-                return [
-                    (vals[i] - vals[i - 1]) / vals[i - 1]
-                    for i in range(1, len(vals))
-                    if vals[i - 1]
-                ]
+        if curve is None:
+            continue
+        try:
+            points = list(curve)
+        except TypeError:
+            continue  # e.g. an EquityCurve analytics object that isn't iterable
+        vals = [v for v in map(_coerce_equity_value, points) if v is not None]
+        if len(vals) > 2:
+            return [
+                (vals[i] - vals[i - 1]) / vals[i - 1]
+                for i in range(1, len(vals))
+                if vals[i - 1]
+            ]
     # Fallback: equal-weight close-to-close return of the first symbol.
     first = features.filter(pl.col("symbol") == features["symbol"][0]).sort("timestamp")
     closes = first["close"].to_list()
@@ -517,7 +587,10 @@ async def _run() -> int:
         provider=_MultiSymbolProvider(provider),  # ty: ignore[invalid-argument-type]
         feature_transform=_feature_transform,
     )
-    _ok(f"feature transform wired: {', '.join(_FEATURES)}")
+    _mapping = ", ".join(
+        f"{out}={name}({_p['period']})" for out, name, _p in _REGISTRY_SPECS
+    )
+    _ok(f"feature transform wired (ml4t.engineer): {_RETURNS_COL}=close.pct_change, {_mapping}")
 
     _stage(5, "Strategies (models.registry.resolve_preset)")
     from ml4t.india.models.registry import resolve_preset
@@ -547,7 +620,12 @@ async def _run() -> int:
         )
     except Exception as exc:  # noqa: BLE001
         _fail(f"backtest failed: {exc}")
+    # Report the feature columns the transform GENUINELY produced (read back
+    # from the real result frame), not a hardcoded label -- this is what proves
+    # Stage 4 actually computed features instead of silently degrading.
+    produced = [c for c in _FEATURES if c in result.features.columns]
     _ok(f"backtest ran over {result.features.height} feature rows; "
+        f"features produced={produced}; "
         f"model_outputs={'present' if result.model_outputs is not None else 'none'}")
 
     _options_leg(instruments)
@@ -632,13 +710,79 @@ async def _paper_simulate(async_client: Any, symbols: list[str], instruments: An
     _ok("confirmed: 0 live orders sent (paper path only)")
 
 
+# Variance at or below this is treated as "no dispersion". The upstream stats
+# refuse a series with sample std == 0; we guard a hair above exact zero so a
+# numerically-flat equity curve (e.g. all-zero placeholder returns) is caught
+# before it reaches the DSR rather than after.
+_RETURN_VARIANCE_EPS = 1e-18
+
+
+def _degenerate_returns_reason(returns: list[float]) -> str | None:
+    """Return an honest NOT-READY reason if *returns* cannot support a DSR.
+
+    A *degenerate* series -- empty, fewer than two points, or effectively
+    zero-variance -- has no deflated Sharpe to compute: the upstream stats
+    legitimately raise ``ValueError("Return series has zero variance")``.
+    Returns ``None`` when the series is healthy enough to gate on.
+    """
+    clean = [r for r in returns if r is not None]
+    if len(clean) < 2:
+        return (
+            f"only {len(clean)} return observation(s); too few to compute a "
+            "deflated Sharpe (strategy produced no tradable signal)"
+        )
+    if statistics.pvariance(clean) <= _RETURN_VARIANCE_EPS:
+        return (
+            "return series has zero variance (strategy produced no tradable "
+            "signal); cannot compute deflated Sharpe"
+        )
+    return None
+
+
+def _not_ready(*reasons: str) -> bool:
+    """Print the NOT-READY banner with explicit reasons and return ``False``."""
+    print()
+    print("\033[1;33m================ NOT READY ================\033[0m")
+    for r in reasons:
+        print(f"  - {r}")
+    print("  Iterate on the strategy before risking capital.")
+    return False
+
+
 def _deploy_gate(returns: list[float]) -> bool:
+    """Deflated-Sharpe deploy gate, failing soft on a degenerate return series.
+
+    While Stage 6 runs the signal-free placeholder strategy it makes no trades,
+    so the equity curve is flat and the extracted returns are all-zero. That is
+    a *degenerate* series with no deflated Sharpe to compute -- the upstream
+    stats correctly refuse it with ``ValueError("Return series has zero
+    variance")``. Rather than crash the pipeline we detect that up front (and
+    defensively catch a late stats refusal) and short-circuit to an HONEST
+    NOT-READY verdict instead of fabricating variance. A real strategy with
+    real trades produces non-degenerate returns and exercises the real DSR
+    path below.
+    """
     from ml4t.diagnostic.evaluation.stats import deflated_sharpe_ratio
+
+    reason = _degenerate_returns_reason(returns)
+    if reason is not None:
+        _warn(reason)
+        return _not_ready(reason)
 
     if len(returns) < 20:
         _warn(f"only {len(returns)} return observations; gate is low-confidence")
 
-    dsr = deflated_sharpe_ratio(returns, frequency="daily")
+    try:
+        dsr = deflated_sharpe_ratio(returns, frequency="daily")
+    except ValueError as exc:
+        # Defensive backstop: only the documented degenerate-stats refusal
+        # (zero variance / too few points) degrades to NOT-READY. Any other
+        # exception type still propagates and crashes loudly, as it should.
+        return _not_ready(
+            f"deflated Sharpe could not be computed ({exc}); "
+            "strategy produced no tradable signal"
+        )
+
     _ok(f"annualised Sharpe {dsr.sharpe_ratio_annualized:.2f}; "
         f"PSR/DSR probability {dsr.probability:.2%}; significant={dsr.is_significant}")
 
@@ -647,21 +791,18 @@ def _deploy_gate(returns: list[float]) -> bool:
                           net_sharpe=dsr.sharpe_ratio_annualized * 0.6)
 
     ready = bool(dsr.is_significant) and agent_ok
-    print()
     if ready:
+        print()
         print("\033[1;32m================ READY TO TRADE ================\033[0m")
         print("  Deflated Sharpe is significant AND the agent review passed.")
-    else:
-        print("\033[1;33m================ NOT READY ================\033[0m")
-        reasons = []
-        if not dsr.is_significant:
-            reasons.append("deflated Sharpe not significant at the chosen confidence")
-        if not agent_ok:
-            reasons.append("agent review did not pass / agent extra not installed")
-        for r in reasons:
-            print(f"  - {r}")
-        print("  Iterate on the strategy before risking capital.")
-    return ready
+        return True
+
+    reasons = []
+    if not dsr.is_significant:
+        reasons.append("deflated Sharpe not significant at the chosen confidence")
+    if not agent_ok:
+        reasons.append("agent review did not pass / agent extra not installed")
+    return _not_ready(*reasons)
 
 
 def _select_agent_llm() -> Any | None:
