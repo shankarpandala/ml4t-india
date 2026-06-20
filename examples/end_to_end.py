@@ -50,6 +50,7 @@ import dataclasses
 import datetime as dt
 import enum
 import json
+import statistics
 import sys
 import tempfile
 from pathlib import Path
@@ -663,13 +664,79 @@ async def _paper_simulate(async_client: Any, symbols: list[str], instruments: An
     _ok("confirmed: 0 live orders sent (paper path only)")
 
 
+# Variance at or below this is treated as "no dispersion". The upstream stats
+# refuse a series with sample std == 0; we guard a hair above exact zero so a
+# numerically-flat equity curve (e.g. all-zero placeholder returns) is caught
+# before it reaches the DSR rather than after.
+_RETURN_VARIANCE_EPS = 1e-18
+
+
+def _degenerate_returns_reason(returns: list[float]) -> str | None:
+    """Return an honest NOT-READY reason if *returns* cannot support a DSR.
+
+    A *degenerate* series -- empty, fewer than two points, or effectively
+    zero-variance -- has no deflated Sharpe to compute: the upstream stats
+    legitimately raise ``ValueError("Return series has zero variance")``.
+    Returns ``None`` when the series is healthy enough to gate on.
+    """
+    clean = [r for r in returns if r is not None]
+    if len(clean) < 2:
+        return (
+            f"only {len(clean)} return observation(s); too few to compute a "
+            "deflated Sharpe (strategy produced no tradable signal)"
+        )
+    if statistics.pvariance(clean) <= _RETURN_VARIANCE_EPS:
+        return (
+            "return series has zero variance (strategy produced no tradable "
+            "signal); cannot compute deflated Sharpe"
+        )
+    return None
+
+
+def _not_ready(*reasons: str) -> bool:
+    """Print the NOT-READY banner with explicit reasons and return ``False``."""
+    print()
+    print("\033[1;33m================ NOT READY ================\033[0m")
+    for r in reasons:
+        print(f"  - {r}")
+    print("  Iterate on the strategy before risking capital.")
+    return False
+
+
 def _deploy_gate(returns: list[float]) -> bool:
+    """Deflated-Sharpe deploy gate, failing soft on a degenerate return series.
+
+    While Stage 6 runs the signal-free placeholder strategy it makes no trades,
+    so the equity curve is flat and the extracted returns are all-zero. That is
+    a *degenerate* series with no deflated Sharpe to compute -- the upstream
+    stats correctly refuse it with ``ValueError("Return series has zero
+    variance")``. Rather than crash the pipeline we detect that up front (and
+    defensively catch a late stats refusal) and short-circuit to an HONEST
+    NOT-READY verdict instead of fabricating variance. A real strategy with
+    real trades produces non-degenerate returns and exercises the real DSR
+    path below.
+    """
     from ml4t.diagnostic.evaluation.stats import deflated_sharpe_ratio
+
+    reason = _degenerate_returns_reason(returns)
+    if reason is not None:
+        _warn(reason)
+        return _not_ready(reason)
 
     if len(returns) < 20:
         _warn(f"only {len(returns)} return observations; gate is low-confidence")
 
-    dsr = deflated_sharpe_ratio(returns, frequency="daily")
+    try:
+        dsr = deflated_sharpe_ratio(returns, frequency="daily")
+    except ValueError as exc:
+        # Defensive backstop: only the documented degenerate-stats refusal
+        # (zero variance / too few points) degrades to NOT-READY. Any other
+        # exception type still propagates and crashes loudly, as it should.
+        return _not_ready(
+            f"deflated Sharpe could not be computed ({exc}); "
+            "strategy produced no tradable signal"
+        )
+
     _ok(f"annualised Sharpe {dsr.sharpe_ratio_annualized:.2f}; "
         f"PSR/DSR probability {dsr.probability:.2%}; significant={dsr.is_significant}")
 
@@ -678,21 +745,18 @@ def _deploy_gate(returns: list[float]) -> bool:
                           net_sharpe=dsr.sharpe_ratio_annualized * 0.6)
 
     ready = bool(dsr.is_significant) and agent_ok
-    print()
     if ready:
+        print()
         print("\033[1;32m================ READY TO TRADE ================\033[0m")
         print("  Deflated Sharpe is significant AND the agent review passed.")
-    else:
-        print("\033[1;33m================ NOT READY ================\033[0m")
-        reasons = []
-        if not dsr.is_significant:
-            reasons.append("deflated Sharpe not significant at the chosen confidence")
-        if not agent_ok:
-            reasons.append("agent review did not pass / agent extra not installed")
-        for r in reasons:
-            print(f"  - {r}")
-        print("  Iterate on the strategy before risking capital.")
-    return ready
+        return True
+
+    reasons = []
+    if not dsr.is_significant:
+        reasons.append("deflated Sharpe not significant at the chosen confidence")
+    if not agent_ok:
+        reasons.append("agent review did not pass / agent extra not installed")
+    return _not_ready(*reasons)
 
 
 def _run_agent(gross_sharpe: float, net_sharpe: float) -> bool:
