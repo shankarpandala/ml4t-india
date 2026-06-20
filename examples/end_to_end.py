@@ -327,24 +327,56 @@ def _build_strategy() -> Any:
 # ---------------------------------------------------------------------------
 
 
+def _coerce_equity_value(point: Any) -> float | None:
+    """Pull the numeric portfolio value out of one equity-curve point.
+
+    The real ``ml4t.backtest.BacktestResult`` stores ``equity_curve`` as a list
+    of ``(timestamp, portfolio_value)`` tuples (see ``BacktestResult`` in the
+    installed library, whose own helpers do ``[float(v) for _, v in
+    self.equity_curve]``). Iterating it therefore yields tuples, not floats, so a
+    bare ``float(point)`` raises ``TypeError``. Prefer a named ``equity`` /
+    ``value`` field when present (a polars ``Row`` or namedtuple), then fall back
+    to the numeric element of a ``(ts, value)`` pair; ``None`` if neither fits.
+    """
+    if isinstance(point, bool):  # bool is an int subclass; never a value here
+        return None
+    if isinstance(point, (int, float)):
+        return float(point)
+    for name in ("equity", "portfolio_value", "value"):
+        named = point.get(name) if isinstance(point, dict) else getattr(point, name, None)
+        if isinstance(named, (int, float)) and not isinstance(named, bool):
+            return float(named)
+    if isinstance(point, (tuple, list)) and point:
+        # (timestamp, value) -> take the last numeric element, not blindly [1].
+        for elem in reversed(point):
+            if isinstance(elem, (int, float)) and not isinstance(elem, bool):
+                return float(elem)
+    return None
+
+
 def _extract_returns(backtest_result: Any, features: pl.DataFrame) -> list[float]:
     """Best-effort daily returns from the backtest, else from close prices."""
     for attr in ("returns", "daily_returns"):
         series = getattr(backtest_result, attr, None)
         if series is not None:
-            values = list(series)
+            values = [v for v in map(_coerce_equity_value, series) if v is not None]
             if len(values) > 2:
-                return [float(v) for v in values]
+                return values
     for attr in ("equity_curve", "portfolio_values", "equity"):
         curve = getattr(backtest_result, attr, None)
-        if curve is not None:
-            vals = [float(v) for v in curve]
-            if len(vals) > 2:
-                return [
-                    (vals[i] - vals[i - 1]) / vals[i - 1]
-                    for i in range(1, len(vals))
-                    if vals[i - 1]
-                ]
+        if curve is None:
+            continue
+        try:
+            points = list(curve)
+        except TypeError:
+            continue  # e.g. an EquityCurve analytics object that isn't iterable
+        vals = [v for v in map(_coerce_equity_value, points) if v is not None]
+        if len(vals) > 2:
+            return [
+                (vals[i] - vals[i - 1]) / vals[i - 1]
+                for i in range(1, len(vals))
+                if vals[i - 1]
+            ]
     # Fallback: equal-weight close-to-close return of the first symbol.
     first = features.filter(pl.col("symbol") == features["symbol"][0]).sort("timestamp")
     closes = first["close"].to_list()
