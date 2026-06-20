@@ -46,3 +46,13 @@ repos:
       - id: check-merge-conflict
       - id: mixed-line-ending
         args: [--fix=lf]
+
+  # Gitleaks: secret-scanning guard. Catches credential / PII that lands in
+  # SOURCE (notebook source cells, arbitrarily-named token files) -- the gap
+  # nbstripout (strips notebook outputs) and .gitignore (token.json, .ml4t/)
+  # structurally cannot cover. Config + allowlist live in .gitleaks.toml;
+  # the same scan also runs in CI (.github/workflows/gitleaks.yml).
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

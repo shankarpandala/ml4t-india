@@ -138,6 +138,48 @@ Tests skip cleanly when credentials are absent. They never run on GitHub
 Actions. See [docs/integration-testing.md](docs/integration-testing.md) for
 VPS/Linux setup, troubleshooting, and security properties.
 
+## Secret scanning
+
+This repo handles live Zerodha Kite credentials, so it guards against
+committing secrets in three layers:
+
+- **`.gitignore`** keeps token files (`token.json`, `.ml4t/`) out of git.
+- **`nbstripout`** (pre-commit) strips notebook **outputs**, where pasted
+  tokens / PII tend to land.
+- **`gitleaks`** scans **source** — including notebook source cells and any
+  arbitrarily-named token file — which the two layers above structurally
+  cannot cover. It runs both locally (pre-commit) and in CI
+  ([`.github/workflows/gitleaks.yml`](.github/workflows/gitleaks.yml)) on
+  every push and pull request, so a leak is caught before merge even if a
+  contributor skips the local hook.
+
+Enable the local hooks once:
+
+```bash
+uv pip install pre-commit
+pre-commit install
+```
+
+Run the secret scan manually against the whole tree:
+
+```bash
+pre-commit run gitleaks --all-files
+# or, with the binary directly:
+gitleaks dir . --no-banner
+```
+
+**Handling a finding.** If gitleaks flags a line:
+
+1. If it is a **real secret**, do **not** just delete the line — the secret
+   is already in your local history. Rotate/revoke it at the source
+   (e.g. regenerate the Kite API secret), then remove it from the working
+   tree before committing.
+2. If it is a **false positive** (a documented placeholder or test fixture),
+   add a narrow, exact-string allowlist entry to
+   [`.gitleaks.toml`](.gitleaks.toml) with a comment explaining why it is
+   safe. Never broaden the allowlist to a pattern that could hide a real
+   secret.
+
 ## License
 
 Not licensed yet.
