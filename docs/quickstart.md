@@ -21,6 +21,25 @@ ml4t-india login --api-key YOUR_API_KEY --api-secret YOUR_API_SECRET
 ml4t-india whoami  # prints redacted cached record + live profile
 ```
 
+### OPT-IN automated login (default OFF)
+
+`ml4t-india login --method auto` logs in headlessly using a password + TOTP
+seed read from the OS keychain. **This is strictly weaker security than the
+manual flow** — it stores your password and your 2FA seed together on one
+host, defeating the two-party 2FA split. It is opt-in and default-off; secrets
+live in the OS keychain only (never `.env`, the repo, config files, or CI), and
+your Kite Connect app must have a `redirect_url` configured.
+
+```bash
+pip install 'ml4t-india[auto-login]'
+python scripts/store_kite_credentials.py             # api_key + api_secret
+python scripts/store_kite_credentials.py --auto-setup # user_id + password + TOTP seed
+ml4t-india login --method auto
+```
+
+See the [README](../README.md#opt-in-automated-login---method-auto) for the
+full security tradeoff.
+
 `KiteClient.from_api_key()` can then pick up the cached token:
 
 ```python

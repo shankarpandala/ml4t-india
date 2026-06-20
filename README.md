@@ -55,10 +55,54 @@ the upstream libraries unchanged:
 ## Installation
 
 ```bash
-pip install ml4t-india           # core
-pip install ml4t-india[options]  # + Black-Scholes Greeks
-pip install ml4t-india[viz]      # + plotly tear sheets
+pip install ml4t-india              # core
+pip install ml4t-india[options]     # + Black-Scholes Greeks
+pip install ml4t-india[viz]         # + plotly tear sheets
+pip install ml4t-india[auto-login]  # + OPT-IN headless login (see warning below)
 pip install ml4t-india[all]
+```
+
+## Login
+
+The default login is a **manual** browser paste flow — no credentials ever
+leave your machine:
+
+```bash
+ml4t-india login --api-key $KITE_API_KEY --api-secret $KITE_API_SECRET
+# opens a URL; paste back the request_token from the redirect
+```
+
+### OPT-IN automated login (`--method auto`)
+
+> [!WARNING]
+> **This is strictly weaker security than manual login and is OFF by default.**
+> Automated login stores your Kite **password** *and* your **TOTP seed**
+> together in the OS keychain. That co-locates both two-factor-authentication
+> factors on a single host, defeating the two-party 2FA split that makes TOTP
+> valuable. Only enable it on a machine you fully control. Secrets live in the
+> **OS keychain only** — never in `.env`, the repo, config files, CI, or logs.
+> Your Kite Connect app must have a **`redirect_url` configured** so the
+> headless flow can capture the `request_token`.
+
+```bash
+# 1. Install the opt-in extra
+pip install 'ml4t-india[auto-login]'
+
+# 2. Store API key/secret (if not already) and the auto-login secrets.
+#    Every value is captured via getpass and written ONLY to the OS keychain.
+python scripts/store_kite_credentials.py             # api_key + api_secret
+python scripts/store_kite_credentials.py --auto-setup # user_id + password + TOTP seed
+
+# 3. Log in headlessly (password + TOTP read from the keychain)
+ml4t-india login --method auto
+```
+
+Inspect what is stored (masked) with `--verify`, or wipe everything with
+`--clear`:
+
+```bash
+python scripts/store_kite_credentials.py --verify
+python scripts/store_kite_credentials.py --clear
 ```
 
 ## Documentation

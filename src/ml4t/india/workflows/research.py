@@ -149,11 +149,17 @@ class ResearchPipeline:
                 )
 
         # Stage 4: backtest.
-        from ml4t.backtest import Engine  # local import, see class docstring
+        from ml4t.backtest import DataFeed, Engine  # local import, see class docstring
 
         config = nse_india_config(**self._config_overrides)
-        engine = Engine(config=config)
-        backtest_result = engine.run(strategy=strategy, data=features)
+        # Engine needs a DataFeed, not a raw OHLCV frame. ``features`` already
+        # carries the provider's timestamp/symbol/OHLCV schema, which DataFeed
+        # auto-resolves; this is a generic research backtest with no separate
+        # signals frame, so ``signals_df`` is left unset (the strategy emits
+        # its own orders via ``on_data``).
+        feed = DataFeed(prices_df=features)
+        engine = Engine(feed=feed, strategy=strategy, config=config)
+        backtest_result = engine.run()
 
         return ResearchPipelineResult(
             data=data,

@@ -33,16 +33,27 @@ def cli() -> None:
 
 @cli.command("login")
 @click.option(
+    "--method",
+    type=click.Choice(["manual", "auto"]),
+    default="manual",
+    show_default=True,
+    help=(
+        "manual: paste the request_token (default, unchanged). "
+        "auto: OPT-IN headless login via password + TOTP read from the OS "
+        "keychain (see `store_kite_credentials --auto-setup`)."
+    ),
+)
+@click.option(
     "--api-key",
     envvar="KITE_API_KEY",
-    required=True,
-    help="Zerodha Kite API key.",
+    default=None,
+    help="Zerodha Kite API key (manual: required; auto: falls back to keychain).",
 )
 @click.option(
     "--api-secret",
     envvar="KITE_API_SECRET",
-    required=True,
-    help="Zerodha Kite API secret (do NOT commit).",
+    default=None,
+    help="Zerodha Kite API secret (manual: required; auto: falls back to keychain).",
     hide_input=True,
 )
 @click.option(
@@ -51,13 +62,35 @@ def cli() -> None:
     default=None,
     help=f"Where to persist the token (default: {default_token_path()}).",
 )
-def login(api_key: str, api_secret: str, token_path: Path | None) -> None:
+def login(
+    method: str,
+    api_key: str | None,
+    api_secret: str | None,
+    token_path: Path | None,
+) -> None:
     """Run the Kite login flow and persist the access token locally.
 
-    Prints the Kite login URL, prompts the user to paste back the
-    ``request_token`` from the post-login redirect URL, exchanges it
-    for an access token, and writes a :class:`TokenRecord` to disk.
+    The default ``manual`` method prints the Kite login URL, prompts for the
+    ``request_token`` from the post-login redirect URL, exchanges it for an
+    access token, and writes a :class:`TokenRecord` to disk.
+
+    The OPT-IN ``--method auto`` method reads password + TOTP secret from the
+    OS keychain and logs in headlessly. It is strictly weaker security than
+    manual login (it co-locates the password and the 2FA seed on one host);
+    see the README before enabling it.
     """
+    if method == "auto":
+        _login_auto(api_key=api_key, api_secret=api_secret, token_path=token_path)
+        return
+
+    # Manual flow is unchanged for current users: both are required and a
+    # missing value is a click usage error (exit 2), matching the prior
+    # `required=True` behavior. They are only optional under --method auto.
+    if not api_key:
+        raise click.UsageError("Missing option '--api-key' (or set KITE_API_KEY).")
+    if not api_secret:
+        raise click.UsageError("Missing option '--api-secret' (or set KITE_API_SECRET).")
+
     url = login_url(api_key)
     click.echo(
         "Open this URL in a browser, log in to Zerodha, then copy the "
@@ -72,6 +105,109 @@ def login(api_key: str, api_secret: str, token_path: Path | None) -> None:
             api_secret=api_secret,
             request_token=request_token,
         )
+    except IndiaError as exc:
+        click.secho(f"Login failed: {exc}", fg="red", err=True)
+        sys.exit(1)
+
+    path = save_token(record, path=token_path)
+    click.secho(
+        f"Access token saved for user {record.user_id} -> {path}",
+        fg="green",
+    )
+
+
+#: OS keychain service and key names shared with
+#: ``scripts/store_kite_credentials.py``. The store script writes these;
+#: the auto-login path reads them. Nothing here is ever written to disk.
+_KEYCHAIN_SERVICE = "ml4t-india"
+_AUTO_LOGIN_KEYS = {
+    "api_key": "kite_api_key",
+    "api_secret": "kite_api_secret",
+    "user_id": "kite_user_id",
+    "password": "kite_password",
+    "totp_secret": "kite_totp_secret",
+}
+
+_AUTO_SETUP_HINT = (
+    "Install the extra and store credentials first:\n"
+    "  pip install 'ml4t-india[auto-login]'\n"
+    "  python scripts/store_kite_credentials.py --auto-setup"
+)
+
+
+def _login_auto(
+    *,
+    api_key: str | None,
+    api_secret: str | None,
+    token_path: Path | None,
+) -> None:
+    """OPT-IN headless login: keychain secrets -> automated_login -> save.
+
+    All credentials live in the OS keychain. ``--api-key``/``--api-secret``
+    (or their env vars) may override the keychain copies; the password and
+    TOTP secret are keychain-only and never accepted on the command line.
+    """
+    # Lazy-import so non-auto users never need keyring / requests / pyotp.
+    try:
+        import keyring  # noqa: PLC0415
+    except ImportError:
+        click.secho(
+            "Auto login needs the optional `keyring` dependency.\n" f"{_AUTO_SETUP_HINT}",
+            fg="red",
+            err=True,
+        )
+        sys.exit(1)
+
+    def _read(name: str) -> str | None:
+        value = keyring.get_password(_KEYCHAIN_SERVICE, _AUTO_LOGIN_KEYS[name])
+        return value or None
+
+    api_key = api_key or _read("api_key")
+    api_secret = api_secret or _read("api_secret")
+    user_id = _read("user_id")
+    password = _read("password")
+    totp_secret = _read("totp_secret")
+
+    missing = [
+        name
+        for name, value in (
+            ("api_key", api_key),
+            ("api_secret", api_secret),
+            ("user_id", user_id),
+            ("password", password),
+            ("totp_secret", totp_secret),
+        )
+        if not value
+    ]
+    if missing:
+        click.secho(
+            "Auto login is missing credentials in the keychain: "
+            f"{', '.join(missing)}.\n{_AUTO_SETUP_HINT}",
+            fg="red",
+            err=True,
+        )
+        sys.exit(1)
+    # All five are present past this point; narrow for the type checker.
+    assert api_key and api_secret and user_id and password and totp_secret
+
+    try:
+        from ml4t.india.kite.auth import automated_login  # noqa: PLC0415
+
+        record = automated_login(
+            api_key=api_key,
+            api_secret=api_secret,
+            user_id=user_id,
+            password=password,
+            totp_secret=totp_secret,
+        )
+    except ImportError:
+        click.secho(
+            "Auto login needs the optional `pyotp`/`requests` dependencies.\n"
+            f"{_AUTO_SETUP_HINT}",
+            fg="red",
+            err=True,
+        )
+        sys.exit(1)
     except IndiaError as exc:
         click.secho(f"Login failed: {exc}", fg="red", err=True)
         sys.exit(1)
