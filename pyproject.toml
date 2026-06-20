@@ -176,6 +176,14 @@ docs = [
     "mkdocs-jupyter>=0.24",
 ]
 
+# LLM research-loop agent (ml4t-agent) -- alpha; opt-in.
+agent = [
+    "ml4t-agent[executor]",
+]
+agent-anthropic = [
+    "ml4t-agent[executor,llm-anthropic]",
+]
+
 all = [
     "ml4t-india[options,auto-login,viz,dev,docs]",
 ]

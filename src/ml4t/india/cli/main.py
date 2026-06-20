@@ -272,6 +272,66 @@ def whoami(token_path: Path | None, fetch_profile: bool) -> None:
     click.echo(json.dumps(profile, indent=2, default=str))
 
 
+@cli.command("agent")
+@click.argument("run_dir", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--universe",
+    default="indices",
+    help="NSE index universe preset threaded as research metadata.",
+)
+@click.option(
+    "--llm",
+    type=click.Choice(["mock", "anthropic"]),
+    default="mock",
+    help="LLM backend: 'mock' (keyless, default) or 'anthropic' (reads "
+    "ANTHROPIC_API_KEY).",
+)
+def agent(run_dir: Path, universe: str, llm: str) -> None:
+    """Run the ml4t-agent research-review loop over a run directory.
+
+    ``RUN_DIR`` must contain an ``evidence_pack.json`` (and any rerun /
+    delta-review fixtures the selected experiment template needs). The
+    default ``--llm mock`` is keyless and offline, so ``--help`` and basic
+    runs need no API key or extra LLM SDK.
+    """
+    from ml4t.india.workflows.agent import IndiaResearchAgent  # noqa: PLC0415
+
+    llm_client = None
+    if llm == "anthropic":
+        # Lazy-build the Anthropic adapter so the default mock path never
+        # imports the SDK or requires a key. AnthropicClient reads
+        # ANTHROPIC_API_KEY from the environment itself.
+        try:
+            from ml4t.agent.llm.anthropic import AnthropicClient  # noqa: PLC0415
+        except ImportError as exc:
+            click.secho(
+                "anthropic backend needs the LLM extra: "
+                "pip install ml4t-india[agent-anthropic]",
+                fg="red",
+                err=True,
+            )
+            raise SystemExit(1) from exc
+        llm_client = AnthropicClient()
+
+    research_agent = IndiaResearchAgent(llm=llm_client, universe=universe)
+    note = research_agent.run(run_dir)
+    click.echo(
+        json.dumps(
+            {
+                "line_id": note.line_id,
+                "iteration_index": note.iteration_index,
+                "decision": note.decision.value,
+                "selected_experiment_id": note.selected_experiment_id,
+                "n_proposals": len(note.proposals),
+                "summary": note.summary,
+                "rationale": note.rationale,
+            },
+            indent=2,
+            default=str,
+        )
+    )
+
+
 def _mask(secret: str, keep_head: int = 4, keep_tail: int = 2) -> str:
     """Shorten a secret to a head/tail fingerprint for log-safe printing."""
     if len(secret) <= keep_head + keep_tail:
