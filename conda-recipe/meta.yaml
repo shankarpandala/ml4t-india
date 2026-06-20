@@ -32,6 +32,10 @@ requirements:
     - ml4t-backtest
     - ml4t-live
     - ml4t-diagnostic
+    # LLM research-loop agent. Conda has no extras; ml4t-backtest (above)
+    # already provides the executor path, so this is Mock-mode only -- the
+    # LLM SDKs (anthropic/openai/google) are intentionally left to pip extras.
+    - ml4t-agent
     # Broker SDK
     - kiteconnect >=5.0.0
     # Market-session awareness

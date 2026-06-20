@@ -224,3 +224,61 @@ class TestKiteconnectAutoSlice:
         assert hasattr(AsyncKiteClient, "place_autoslice_order"), (
             "AsyncKiteClient facade lost its place_autoslice_order wrapper."
         )
+
+
+class TestMl4tAgentResearchLoop:
+    """Pin the ``ml4t.agent`` surface :class:`IndiaResearchAgent` wraps.
+
+    ml4t-agent is the opt-in ``agent`` extra (alpha); when it is not
+    installed these tests skip rather than fail, mirroring how the wrapper
+    degrades. When it *is* installed they freeze the exact constructor /
+    run / LineState shape our wrapper threads India defaults through.
+    """
+
+    def test_research_review_agent_init_signature(self) -> None:
+        agent = pytest.importorskip("ml4t.agent")
+
+        sig = inspect.signature(agent.ResearchReviewAgent.__init__)
+        params = list(sig.parameters)
+        assert params[:3] == ["self", "llm", "line_state"], (
+            "ResearchReviewAgent.__init__ leading params drifted: got "
+            f"{params}. IndiaResearchAgent calls ResearchReviewAgent("
+            "llm=..., line_state=...) and forwards the rest as **overrides."
+        )
+        for name in ("templates", "max_steps"):
+            assert name in sig.parameters, (
+                f"ResearchReviewAgent.__init__ dropped keyword {name!r}; "
+                "IndiaResearchAgent forwards it via **agent_overrides."
+            )
+
+    def test_research_review_agent_run_signature(self) -> None:
+        agent = pytest.importorskip("ml4t.agent")
+
+        sig = inspect.signature(agent.ResearchReviewAgent.run)
+        assert list(sig.parameters) == ["self", "run_dir"], (
+            "ResearchReviewAgent.run parameter list changed; "
+            "IndiaResearchAgent.run delegates straight through to it."
+        )
+
+    def test_line_state_fields(self) -> None:
+        pytest.importorskip("ml4t.agent")
+        import dataclasses
+
+        from ml4t.agent.schemas.workflow import LineState
+
+        fields = {f.name for f in dataclasses.fields(LineState)}
+        required = {"line_id", "iteration_index", "max_iterations", "base_alpha"}
+        missing = required - fields
+        assert not missing, (
+            f"ml4t.agent LineState dropped field(s): {missing}. "
+            "IndiaResearchAgent builds LineState(line_id=..., "
+            "iteration_index=...) and relies on the documented defaults."
+        )
+
+    def test_mock_llm_client_present(self) -> None:
+        agent = pytest.importorskip("ml4t.agent")
+
+        assert hasattr(agent, "MockLLMClient"), (
+            "ml4t.agent dropped MockLLMClient; IndiaResearchAgent's keyless "
+            "default LLM depends on it."
+        )
