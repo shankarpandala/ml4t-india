@@ -258,26 +258,60 @@ class _MultiSymbolProvider:
 # Stage 4: feature transform (ml4t.engineer.compute_features).
 # ---------------------------------------------------------------------------
 
-_FEATURES = ["returns", "sma_10", "sma_20", "rsi_14", "volatility_20"]
+# Output column -> (ml4t.engineer registry feature, params).
+#
+# These map to the *real* ``ml4t.engineer`` registry. The intuitive labels
+# ``returns/sma_10/sma_20/rsi_14/volatility_20`` are NOT registry feature
+# names (``compute_features`` would raise ``ValueError: Feature 'returns' not
+# found in registry``); the genuine registry names are ``sma`` (param
+# ``period``), ``rsi`` (param ``period``) and ``realized_volatility`` (param
+# ``period``). Because the engineer aliases every feature to its bare registry
+# name, two ``sma`` calls would both land in one ``sma`` column -- so each
+# feature is computed in isolation and renamed to a distinct output column.
+_RETURNS_COL = "returns"
+_REGISTRY_SPECS: tuple[tuple[str, str, dict[str, Any]], ...] = (
+    ("sma_10", "sma", {"period": 10}),
+    ("sma_20", "sma", {"period": 20}),
+    ("rsi_14", "rsi", {"period": 14}),
+    ("volatility_20", "realized_volatility", {"period": 20}),
+)
+# All output columns the transform produces, returns first.
+_FEATURES = [_RETURNS_COL, *(out for out, _name, _p in _REGISTRY_SPECS)]
 
 
 def _feature_transform(data: pl.DataFrame) -> pl.DataFrame:
     """Per-symbol feature engineering via ml4t-engineer.
 
     Computed per symbol so windowed features don't bleed across the
-    vertical concat of multiple instruments.
+    vertical concat of multiple instruments. ``returns`` is the simple
+    close-to-close return (no registry feature emits a bare ``returns``
+    column, and ``realized_volatility`` consumes one as its input); the rest
+    come straight from ``ml4t.engineer.compute_features`` with the real
+    registry names in :data:`_REGISTRY_SPECS`.
+
+    A missing/renamed registry feature now raises ``ValueError`` out of
+    ``compute_features`` and propagates -- the orchestrator's Stage-6 guard
+    turns that into a loud ``_fail`` instead of silently falling back to raw
+    OHLCV and *claiming* features were computed.
     """
     from ml4t.engineer import compute_features
 
     out: list[pl.DataFrame] = []
     for (_symbol,), group in data.group_by(["symbol"], maintain_order=True):
-        try:
-            enriched = compute_features(group.sort("timestamp"), _FEATURES)
-        except Exception:  # noqa: BLE001 -- a missing catalog feature must not abort the run
-            enriched = group
-        if isinstance(enriched, pl.LazyFrame):
-            enriched = enriched.collect()
-        out.append(enriched)
+        work = group.sort("timestamp").with_columns(
+            pl.col("close").pct_change().alias(_RETURNS_COL)
+        )
+        for out_col, feature_name, params in _REGISTRY_SPECS:
+            enriched = compute_features(work, [{"name": feature_name, "params": params}])
+            if isinstance(enriched, pl.LazyFrame):
+                enriched = enriched.collect()
+            # The engineer appends the feature under its bare registry name;
+            # lift it into the distinct output column and drop the bare name so
+            # the next (same-named) feature can't collide with it.
+            work = work.with_columns(
+                enriched.get_column(feature_name).alias(out_col)
+            ).drop(feature_name, strict=False)
+        out.append(work)
     return pl.concat(out, how="vertical_relaxed") if out else data
 
 
@@ -285,11 +319,14 @@ def _feature_transform(data: pl.DataFrame) -> pl.DataFrame:
 # Stage 6 helper: assemble the cross-sectional panel the PCA preset needs.
 # ---------------------------------------------------------------------------
 
-# Characteristic columns to forward to the panel when present. Only those
-# actually produced by the feature stage are used; the PCA preset needs the
-# returns panel (derived from real close prices) and treats characteristics
-# as optional, so a degraded feature stage still yields a valid PCA input.
-_PANEL_FEATURES = [f for f in _FEATURES if f != "returns"]
+# Characteristic columns to forward to the panel. These are the real
+# registry-backed feature columns (sma_10/sma_20/rsi_14/volatility_20) the
+# feature stage now genuinely produces -- so the PCA panel carries a
+# ``(T, N, F)`` characteristics tensor, not just the returns matrix. The PCA
+# preset still treats characteristics as optional, and ``build_persistent_panel``
+# forwards only columns actually present, so any single absent column degrades
+# gracefully rather than aborting the panel build.
+_PANEL_FEATURES = [out for out, _name, _p in _REGISTRY_SPECS]
 
 
 def _build_panel(features: pl.DataFrame) -> Any:
@@ -549,7 +586,10 @@ async def _run() -> int:
         provider=_MultiSymbolProvider(provider),  # ty: ignore[invalid-argument-type]
         feature_transform=_feature_transform,
     )
-    _ok(f"feature transform wired: {', '.join(_FEATURES)}")
+    _mapping = ", ".join(
+        f"{out}={name}({_p['period']})" for out, name, _p in _REGISTRY_SPECS
+    )
+    _ok(f"feature transform wired (ml4t.engineer): {_RETURNS_COL}=close.pct_change, {_mapping}")
 
     _stage(5, "Strategies (models.registry.resolve_preset)")
     from ml4t.india.models.registry import resolve_preset
@@ -579,7 +619,12 @@ async def _run() -> int:
         )
     except Exception as exc:  # noqa: BLE001
         _fail(f"backtest failed: {exc}")
+    # Report the feature columns the transform GENUINELY produced (read back
+    # from the real result frame), not a hardcoded label -- this is what proves
+    # Stage 4 actually computed features instead of silently degrading.
+    produced = [c for c in _FEATURES if c in result.features.columns]
     _ok(f"backtest ran over {result.features.height} feature rows; "
+        f"features produced={produced}; "
         f"model_outputs={'present' if result.model_outputs is not None else 'none'}")
 
     _options_leg(instruments)
