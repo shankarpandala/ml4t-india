@@ -114,6 +114,9 @@ dependencies = [
     # pinned here too because our adapters import them directly)
     "polars>=0.20",
     "pyarrow>=14",
+    # Promoted from transitive (kiteconnect already requires it): the Kite
+    # web login surface in kite/auth.py imports `requests` directly.
+    "requests>=2.18.4",
     "pandas>=2",
     "httpx>=0.27,<1",
     "tenacity>=8",
@@ -130,6 +133,17 @@ dependencies = [
 # stays usable when py_vollib is not installed.
 options = [
     "py_vollib>=1.0.1",
+]
+
+# OPT-IN automated Zerodha Kite login (password + TOTP). Default-OFF and
+# never part of the base install: it drives the browser-facing login
+# surface and reads secrets from the OS keychain. See README for the
+# security tradeoff (co-locating the password + 2FA seed is weaker than
+# manual login).
+auto-login = [
+    "pyotp>=2.9",
+    "requests>=2.18.4",
+    "keyring>=25",
 ]
 
 # Plotly-driven tear sheets inherited from ml4t-diagnostic.
@@ -162,7 +176,7 @@ docs = [
 ]
 
 all = [
-    "ml4t-india[options,viz,dev,docs]",
+    "ml4t-india[options,auto-login,viz,dev,docs]",
 ]
 
 [project.scripts]
